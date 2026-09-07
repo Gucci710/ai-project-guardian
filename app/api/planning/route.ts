@@ -101,7 +101,7 @@ ${specification}
     return Response.json(
       {
         success: false,
-        error: "Planning Agentの実行に失敗しました。",
+        error: error instanceof Error ? error.message : String(error),
       },
       { status: 500 }
     );

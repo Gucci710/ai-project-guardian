@@ -17,6 +17,26 @@ type Log = {
   type?: "normal" | "success" | "alert";
 };
 
+type PlanningResult = {
+  projectSummary: string;
+  screens: number;
+  functions: number;
+  businessFlows: number;
+  externalDependencies: number;
+  estimateHours: number;
+  scheduleDays: number;
+  confidence: number;
+  evidenceCoverage: number;
+  breakdown: {
+    area: string;
+    hours: number;
+    reason: string;
+  }[];
+  evidence: string[];
+  uncertainties: string[];
+  risks: string[];
+};
+
 const initialAgents: Agent[] = [
   { name: "Planning AI", role: "PROJECT PLANNING", status: "WAITING" },
   { name: "QA Review AI", role: "ADVERSARIAL REVIEW", status: "WAITING" },
@@ -44,6 +64,7 @@ export default function Home() {
   const [changeRequest, setChangeRequest] = useState(false);
   const [replanning, setReplanning] = useState(false);
   const [finalVerified, setFinalVerified] = useState(false);
+  const [planningResult, setPlanningResult] = useState<PlanningResult | null>(null);
 
   const now = () =>
     new Date().toLocaleTimeString("ja-JP", {
@@ -104,25 +125,99 @@ export default function Home() {
 
     addLog("Planning AI", "仕様書を解析しています");
 
-    await wait(1200);
+    // --------------------------------------------------
+    // REAL PLANNING AGENT
+    // Gemini 3.7 FlashでSmartShopのサンプル仕様を分析
+    // --------------------------------------------------
+    const specification = `
+SmartShop ECサイト仕様
 
-    addLog("Planning AI", "14画面を検出");
-    addLog("Planning AI", "38機能を構造化");
-    addLog("Planning AI", "7つのビジネスフローを検出");
+【ユーザー向け】
+- メールアドレスとパスワードによるログイン
+- パスワードリセット
+- 商品一覧
+- 商品詳細
+- 商品検索
+- カテゴリ絞り込み
+- カートへの追加
+- カート内商品の数量変更
+- カート内商品の削除
+- クレジットカード決済
+- 注文確認
+- 注文完了
+- 注文履歴
 
-    await wait(900);
+【管理者向け】
+- 商品登録
+- 在庫管理
+- 注文管理
 
-    addLog("Planning AI", "プロジェクト計画を生成");
+【外部依存】
+- 決済サービス
+- メール送信サービス
 
-    await wait(900);
+【注意事項】
+- 決済失敗時の画面・再試行仕様は未定義
+- 在庫更新が同時発生した場合の競合制御は未定義
+- パスワードリセットURLの有効期限は未定義
+`;
 
-    updateAgent("Planning AI", "DONE");
+    try {
+      const response = await fetch("/api/planning", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ specification }),
+      });
 
-    addLog(
-      "Planning AI",
-      "見積もり 86h / 10営業日 / 信頼度 82%",
-      "success"
-    );
+      const data = await response.json();
+
+      if (!response.ok || !data.success || !data.result) {
+        throw new Error(data.error ?? "Planning Agent failed");
+      }
+
+      const result = data.result as PlanningResult;
+      setPlanningResult(result);
+
+      addLog("Planning AI", `${result.screens}画面を検出`);
+      addLog("Planning AI", `${result.functions}機能を構造化`);
+      addLog("Planning AI", `${result.businessFlows}つのビジネスフローを検出`);
+
+      await wait(700);
+
+      addLog("Planning AI", "プロジェクト計画を生成");
+
+      await wait(700);
+
+      setEstimate(Math.round(result.estimateHours));
+      setReleaseDays(Math.round(result.scheduleDays));
+      setTrustScore(Math.min(99, Math.max(0, Math.round(result.confidence))));
+      setEvidence(
+        Math.min(99, Math.max(0, Math.round(result.evidenceCoverage)))
+      );
+
+      updateAgent("Planning AI", "DONE");
+
+      addLog(
+        "Planning AI",
+        `見積もり ${Math.round(result.estimateHours)}h / ${Math.round(
+          result.scheduleDays
+        )}営業日 / 信頼度 ${Math.round(result.confidence)}%`,
+        "success"
+      );
+    } catch (error) {
+      console.error(error);
+
+      updateAgent("Planning AI", "ALERT");
+      addLog(
+        "Planning AI",
+        "Planning Agentの実行に失敗しました。処理を停止します。",
+        "alert"
+      );
+      setPhase("PLANNING ERROR");
+      return;
+    }
 
     // --------------------------------------------------
     // 2. QA REVIEW
