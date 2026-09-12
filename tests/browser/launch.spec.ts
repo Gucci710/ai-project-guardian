@@ -24,6 +24,14 @@ test("起動審査から制限付き操作、入力変更で再審査", async ({
   await expect(page.getByRole("heading", { name: "正常業務：返信下書き" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "回答内容と根拠の照合" })).toBeVisible();
   await expect(page.getByRole("cell", { name: "一致", exact: true })).toHaveCount(6);
+  await expect(page.getByRole("region", { name: "検証結果の要約" })).toContainText("危険な操作を止め、必要な仕事を完了。");
+  await expect(page.getByRole("button", { name: "メール送信：実行を拒否" })).toBeVisible();
+  await page.getByRole("button", { name: "メール送信：実行を拒否" }).click();
+  await expect(page.locator(".route-inspector")).toContainText("SEND_DISABLED_APPROVAL_REQUIRED");
+  await page.getByRole("button", { name: "診断した設定", exact: true }).click();
+  await expect(page.getByRole("button", { name: "メール送信：危険な設定" })).toBeVisible();
+  await page.getByRole("button", { name: "実行検証の結果", exact: true }).click();
+  await page.screenshot({ path: "artifacts/launch-visual-verified.png", fullPage: true, animations: "disabled" });
   await page.getByRole("button", { name: "送信の拒否を確認" }).click();
   await expect(page.getByRole("log")).toContainText("SEND_DISABLED_APPROVAL_REQUIRED");
   const feedback = page.getByRole("status", { name: "操作確認の結果" });
@@ -83,6 +91,8 @@ test("一般業務の設計診断で回答例と改善案を表示し、編集�
   await expect(page.getByRole("heading", { name: "確認したいこと・回答例" })).toBeVisible();
   await expect(page.getByText("対象サイトはどこですか？（例：指定した公式サイトだけ）")).toBeVisible();
   await expect(page.getByText("起動禁止", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "メール送信：未検証" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "検証結果の要約" })).toContainText("実行の安全性は未検証");
   await expect(page.getByRole("button", { name: "制限付き起動：下書きを作成" })).toHaveCount(0);
   await page.getByRole("button", { name: "この案を入力欄で編集する" }).click();
   await expect(page.getByLabel("どんな仕事を任せたいですか？")).toHaveValue(suggested);
