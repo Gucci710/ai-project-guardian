@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit --incremental false",
     "test:browser": "playwright test",
     "verify:live": "node scripts/verify-live.mjs",
-    "test": "tsc --module commonjs --moduleResolution node --target ES2022 --esModuleInterop --skipLibCheck --outDir .test-build tests/guardian.test.ts && node --test .test-build/tests/guardian.test.js"
+    "verify:launch": "node scripts/verify-launch.mjs",
+    "test": "tsc --module commonjs --moduleResolution node --target ES2022 --esModuleInterop --skipLibCheck --outDir .test-build tests/guardian.test.ts tests/launch.test.ts && node --test .test-build/tests/guardian.test.js .test-build/tests/launch.test.js"
   },
   "dependencies": {
     "@google/genai": "^2.21.0",

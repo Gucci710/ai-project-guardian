@@ -1,5 +1,7 @@
 # Google Cloud / Cloud Run デプロイ手順
 
+主画面はAgent Guardianの起動審査へ移行しました。`/` で問い合わせ対応エージェントの診断・制限・再検証、`/planning` で従来のSmartShop計画を確認できます。[起動審査の設計と検証範囲](launch-protocol.md)も参照してください。
+
 ## 最初にユーザーが行うこと
 
 1. [Google Cloud Console](https://console.cloud.google.com/)にGoogleアカウントでログインし、この作品用のプロジェクトを作成します。
@@ -97,9 +99,17 @@ gcloud run services proxy ai-project-guardian \
   --port 8080
 ```
 
-Cloud Shellの「ウェブでプレビュー」からポート8080を開きます。SmartShopで開始し、必要なら計画を確認して続行を承認してください。プロキシ実行者にはCloud Run Invoker権限が必要です。
+Cloud Shellの「ウェブでプレビュー」からポート8080を開きます。主画面の危険例で起動審査を開始し、制限付き許可後に下書き作成・送信拒否・削除拒否を確認してください。従来のSmartShopは `/planning` で確認できます。プロキシ実行者にはCloud Run Invoker権限が必要です。
 
 確認項目:
+
+- `/` で診断の原文根拠・修正版仕様・9件の実行検証が表示される。
+- 情報不足やAPIエラーでは起動許可が出ない。
+- 制限付き許可で下書きは作成でき、送信・削除は拒否される。
+- 入力変更後は起動操作が消え、再審査が必要になる。
+- 監査JSONを保存できる。
+
+従来の計画機能の確認項目:
 
 - `/api/health`が`{"status":"ok"}`を返す。
 - 仕様と人数を入力してPlanning結果が表示される。

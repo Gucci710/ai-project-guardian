@@ -6,7 +6,7 @@ export default defineConfig({
   workers: 1,
   timeout: 30000,
   use: {
-    baseURL: process.env.GUARDIAN_TEST_URL || "http://127.0.0.1:3100",
+    baseURL: process.env.GUARDIAN_TEST_URL || "http://localhost:3100",
     browserName: "chromium",
     channel: process.env.PLAYWRIGHT_CHANNEL || (process.platform === "win32" ? "chrome" : undefined),
     screenshot: "only-on-failure",

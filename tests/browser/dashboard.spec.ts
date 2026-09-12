@@ -14,7 +14,7 @@ test("desktop: 初期画面とフォームに固定の見積もりを出さな�
   await page.setViewportSize({ width: 1440, height: 1050 });
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto("/");
+  await page.goto("/planning");
   await expect(page).toHaveTitle(/AI Project Guardian/);
   await expect(page.getByLabel("開発人数")).toHaveValue("3");
   await expect(page.getByLabel("QA人数")).toHaveValue("2");
@@ -40,7 +40,7 @@ test("承認内容を渡して再開し、攻撃比較と実値を表示する",
       await route.fulfill({ contentType: "application/x-ndjson", body: body([{ type: "snapshot", snapshot: complete }, { type: "phase", phase: "VERIFIED", message: "今回の攻撃を拒否しました" }, { type: "checkpoint", purpose: "verified", token: "verified-test", message: "検証完了" }]) });
     }
   });
-  await page.goto("/");
+  await page.goto("/planning");
   await page.getByLabel("開発人数").fill("4");
   await page.getByRole("button", { name: "プロジェクト検証を開始" }).click();
   await expect(page.getByRole("button", { name: "内容を確認して検証を続行" })).toBeVisible();
@@ -58,7 +58,7 @@ test("承認内容を渡して再開し、攻撃比較と実値を表示する",
 test("mobile: エラー時に演出を止め、再試行できる", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.route("**/api/guardian", (route) => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ success: false, error: "検証用: Geminiが混雑しています" }) }));
-  await page.goto("/");
+  await page.goto("/planning");
   await page.getByRole("button", { name: "プロジェクト検証を開始" }).click();
   await expect(page.locator(".phase-title")).toHaveText("ERROR");
   await expect(page.locator(".alert-box[role=alert]")).toContainText("Geminiが混雑しています");
@@ -73,7 +73,7 @@ test("実行停止で通信を中断し、再実行可能な待機状態へ戻�
     await new Promise((resolve) => setTimeout(resolve, 1500));
     await route.fulfill({ contentType: "application/x-ndjson", body: "" });
   });
-  await page.goto("/");
+  await page.goto("/planning");
   await page.getByRole("button", { name: "プロジェクト検証を開始" }).click();
   await page.getByRole("button", { name: "実行を停止" }).click();
   await expect(page.locator(".phase-title")).toHaveText("STOPPED");
