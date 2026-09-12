@@ -49,6 +49,10 @@
 .launch-log .denied strong { color: #ff8da3; }
 .launch-log p { margin: 5px 0; font-size: 12px; }
 .launch-error { color: #ff9bb1; padding: 18px; border: 1px solid #ff6c8966; border-radius: 8px; }
+.operation-result { border: 1px solid #65b6ff66; border-left: 3px solid #65b6ff; border-radius: 6px; padding: 16px 20px; margin: 16px 0; background: #65b6ff0a; }
+.operation-result h3 { margin: 0 0 8px; color: #b2dcff; }
+.operation-result.pending { border-color: #efd28e; }
+.operation-result.error { border-color: #ff8da3; }
 .launch-footer { padding: 30px 0; color: #8197ac; font-size: 11px; line-height: 1.9; }
 @media (max-width: 850px) { .launch-shell .mission-grid { grid-template-columns: 1fr; } .permission-map { grid-template-columns: repeat(2, 1fr); } .launch-metrics { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 550px) { .launch-shell.shell { padding-inline: 16px; } .launch-shell .header { flex-wrap: wrap; padding-block: 15px; } .launch-shell .hero { display: block; } .permission-map, .launch-columns { grid-template-columns: 1fr; } .launch-section { padding: 18px; } .launch-pipeline { grid-template-columns: repeat(3, 1fr); } .launch-section .panel-heading { flex-wrap: wrap; } }

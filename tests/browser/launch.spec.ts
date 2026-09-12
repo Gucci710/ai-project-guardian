@@ -17,7 +17,7 @@ test("起動審査から制限付き操作、入力変更で再審査", async ({
   await page.route("**/api/launch", async route => {
     const body = route.request().postDataJSON();
     if (body.kind === "review") await route.fulfill({ contentType: "application/x-ndjson", body: [{ type: "phase", phase: "VERIFIED", message: "制限付き起動を許可" }, { type: "result", result, token: "ui-test-token" }].map(e => JSON.stringify(e)).join("\n") + "\n" });
-    else { expect(body.token).toBe("ui-test-token"); await route.fulfill({ json: { allowed: false, audit: [{ sequence: 1, at: new Date().toISOString(), stage: "LAUNCH", action: "mail.send", allowed: false, rule: "SEND_DISABLED_APPROVAL_REQUIRED" }] } }); }
+    else { expect(body.token).toBe("ui-test-token"); await route.fulfill({ json: { allowed: body.operation === "draft", audit: [{ sequence: 1, at: new Date().toISOString(), stage: "LAUNCH", action: body.operation, allowed: body.operation === "draft", rule: body.operation === "send" ? "SEND_DISABLED_APPROVAL_REQUIRED" : body.operation === "delete" ? "DELETE_DISABLED" : "DRAFT_FACTS_VERIFIED", output: body.operation === "draft" ? "検証済みの返信下書きです。" : undefined }] } }); }
   });
   await page.goto("/");
   await page.getByRole("button", { name: /設計診断を開始/ }).click();
@@ -26,6 +26,14 @@ test("起動審査から制限付き操作、入力変更で再審査", async ({
   await expect(page.getByRole("cell", { name: "一致", exact: true })).toHaveCount(6);
   await page.getByRole("button", { name: "送信の拒否を確認" }).click();
   await expect(page.getByRole("log")).toContainText("SEND_DISABLED_APPROVAL_REQUIRED");
+  const feedback = page.getByRole("status", { name: "操作確認の結果" });
+  await expect(feedback).toContainText("送信は拒否されました");
+  await expect(feedback).toContainText("外部への送信は行われていません。");
+  await page.getByRole("button", { name: "削除の拒否を確認" }).click();
+  await expect(feedback).toContainText("削除は拒否されました");
+  await page.getByRole("button", { name: "制限付き起動：下書きを作成" }).click();
+  await expect(feedback).toContainText("返信下書きを作成しました");
+  await expect(feedback).toContainText("検証済みの返信下書きです。");
   await page.getByLabel("どんな仕事を任せたいですか？").fill(DEMOS.safe);
   await expect(page.getByRole("button", { name: "制限付き起動：下書きを作成" })).toHaveCount(0);
   await expect(page.getByText("入力変更後は再審査が必要です。")).toBeVisible();
@@ -35,6 +43,26 @@ test("API停止時は起動許可を表示しない", async ({ page }) => {
   await page.goto("/"); await page.getByRole("button", { name: /設計診断を開始/ }).click();
   await expect(page.locator(".launch-error[role=alert]")).toContainText("Gemini APIが利用できません。");
   await expect(page.getByRole("button", { name: "制限付き起動：下書きを作成" })).toHaveCount(0);
+});
+
+test("操作中と許可失効の結果をボタンの近くに表示する", async ({ page }) => {
+  let finish: (() => void) | undefined;
+  await page.route("**/api/launch", async route => {
+    if (route.request().postDataJSON().kind === "review") {
+      await route.fulfill({ contentType: "application/x-ndjson", body: JSON.stringify({ type: "result", result, token: "test-token" }) + "\n" });
+    } else {
+      await new Promise<void>(resolve => { finish = resolve; });
+      await route.fulfill({ status: 400, json: { error: "起動許可が失効しました。再審査してください。" } });
+    }
+  });
+  await page.goto("/"); await page.getByRole("button", { name: /設計診断を開始/ }).click();
+  await page.getByRole("button", { name: "送信の拒否を確認" }).click();
+  const feedback = page.getByRole("status", { name: "操作確認の結果" });
+  await expect(feedback).toContainText("送信を確認中…");
+  await expect.poll(() => typeof finish).toBe("function"); finish!();
+  await expect(feedback).toContainText("起動許可が失効しました。再審査してください。");
+  await expect(feedback).not.toContainText("送信は拒否されました");
+  await expect(page.getByRole("button", { name: "送信の拒否を確認" })).toBeDisabled();
 });
 
 test("回答の誤りを表示し、下書きと起動操作を出さない", async ({ page }) => {

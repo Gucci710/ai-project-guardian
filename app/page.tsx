@@ -15,16 +15,17 @@ export default function LaunchPage() {
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
   const [visited, setVisited] = useState<string[]>([]);
+  const [operationResult, setOperationResult] = useState<{ title: string; detail: string; output?: string; rule?: string; state: "pending" | "done" | "error" } | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const abort = useRef<AbortController | null>(null);
   const log = useRef<HTMLDivElement | null>(null);
   useEffect(() => () => abort.current?.abort(), []);
   useEffect(() => { if (log.current) log.current.scrollTop = log.current.scrollHeight; }, [audit]);
-  function edit(value: string) { setInput(value); setToken(""); setResult(null); setAudit([]); setPhase("READY"); setVisited([]); setError(""); setMessage("入力変更後は再審査が必要です。"); }
+  function edit(value: string) { setInput(value); setToken(""); setResult(null); setAudit([]); setPhase("READY"); setVisited([]); setError(""); setOperationResult(null); setMessage("入力変更後は再審査が必要です。"); }
   async function review() {
     if (abort.current) return;
     const controller = new AbortController(); abort.current = controller;
-    setBusy(true); setResult(null); setAudit([]); setToken(""); setError(""); setVisited([]); setPhase("DIAGNOSIS"); setMessage("Geminiに接続しています…");
+    setBusy(true); setResult(null); setAudit([]); setToken(""); setError(""); setOperationResult(null); setVisited([]); setPhase("DIAGNOSIS"); setMessage("Geminiに接続しています…");
     let completed = false;
     function receive(line: string) {
       if (!line.trim()) return;
@@ -48,12 +49,18 @@ export default function LaunchPage() {
   async function execute(operation: string) {
     if (abort.current) return;
     const controller = new AbortController(); abort.current = controller; setBusy(true); setError("");
+    const action = operation === "draft" ? "下書き作成" : operation === "send" ? "送信" : "削除";
+    setOperationResult({ title: `${action}を確認中…`, detail: "サーバーで権限を確認しています。", state: "pending" });
     try {
-      const response = await fetch("/api/launch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "execute", token, operation }), signal: controller.signal });
+      const response = await fetch("/api/launch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "execute", token, operation }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
       const data = await response.json(); if (!response.ok) { setToken(""); throw new Error(data.error); }
+      const last: Audit | undefined = data.audit?.at(-1);
+      if (!last || typeof data.allowed !== "boolean") throw new Error("操作結果を確認できませんでした。もう一度お試しください。");
+      const reasons: Record<string, string> = { SEND_DISABLED_APPROVAL_REQUIRED: "この起動許可ではメール送信を許可していません。外部への送信は行われていません。", DELETE_DISABLED: "この起動許可ではファイル削除を許可していません。ファイルは削除されていません。", CALL_LIMIT: "操作回数の上限に達したため、実行を停止しました。", DRAFT_FACTS_REJECTED: "回答内容と根拠が一致しないため、下書きを作成しませんでした。" };
+      setOperationResult({ title: data.allowed ? operation === "draft" ? "返信下書きを作成しました" : `${action}操作が許可されました` : `${action}は拒否されました`, detail: data.allowed ? "合成データでの操作結果です。実際のメール送信やファイル操作は行いません。" : reasons[last.rule] || "権限チェックで実行を停止しました。詳細は監査ログで確認できます。", output: last.output, rule: last.rule, state: "done" });
       setAudit(a => [...a, ...data.audit.map((e: Audit, i: number) => ({ ...e, sequence: a.length + i + 1 }))]);
       setMessage(data.allowed ? "許可された範囲で返信下書きを作成しました。" : "実行直前の権限チェックで操作を拒否しました。監査ログを確認できます。");
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "操作に失敗しました。"); }
+    } catch (caught) { const detail = controller.signal.aborted ? "確認を中断しました。操作結果は確認できていません。" : caught instanceof Error ? caught.message : "操作に失敗しました。"; setError(detail); setOperationResult({ title: `${action}の確認を完了できませんでした`, detail, state: "error" }); }
     finally { abort.current = null; setBusy(false); }
   }
   function download() {
@@ -84,11 +91,11 @@ export default function LaunchPage() {
           <h3>説明の改善案（未確定の提案を含みます）</h3><p className="launch-draft">{result.diagnosis.guidance.suggestedSpecification}</p><button className="button secondary" disabled={busy} onClick={() => { edit(result.diagnosis.guidance.suggestedSpecification); inputRef.current?.focus(); inputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>この案を入力欄で編集する</button><p className="field-help">提案の内容を確認し、【要記入】を埋めてから再診断してください。ボタンを押すだけでは実行・承認されません。</p>
         </section>
         <section className="panel launch-section"><p className="eyebrow">EVIDENCE / PERMISSION MAP</p><h2>何が危険で、何が未確認か</h2><p>{result.diagnosis.summary}</p><div className="permission-map">{result.diagnosis.findings.map(f => <article key={f.capability} className={`permission-node ${f.status}`}><span className={`tag ${f.status === "danger" ? "red" : f.status === "safe" ? "green" : "amber"}`}>{f.status === "danger" ? "危険" : f.status === "safe" ? "制限あり" : "未確認"}</span><h3>{NAMES[f.capability]}</h3><p>{f.reason}</p>{f.quote && <blockquote>「{f.quote}」</blockquote>}</article>)}</div><details><summary>スコアと確認率の算出規則</summary><p>無承認送信・削除は100、その他の危険は75、未確認は50、明記された制限は0。6項目の最大値を採用。確認率は元入力に一致する4文字以上の引用で裏付けられた項目数÷6です。引用一致は意味の正しさや実環境の安全性を保証しません。</p></details></section>
-        {result.repair && <section className="panel launch-section"><p className="eyebrow">BEFORE / AFTER</p><h2>仕事を残して、権限を絞る</h2><div className="launch-columns"><article><h3>元の説明</h3><p>{result.input}</p></article><article><h3>修正版仕様</h3><p>{result.repair.specification}</p></article></div><div className="launch-columns"><article><h3>変更理由</h3><ul>{result.repair.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul></article><article><h3>残る制約</h3><ul>{result.repair.limitations.map((r, i) => <li key={i}>{r}</li>)}</ul></article></div><details><summary>機械で読み取れる権限ルール</summary><pre>{JSON.stringify(result.repair.policy, null, 2)}</pre></details></section>}
+        {result.repair && <section className="panel launch-section"><p className="eyebrow">BEFORE / AFTER</p><h2>安全に実行するための変更案</h2><p>元の説明から何を変更し、どの操作を制限するかをまとめています。</p><div className="launch-columns"><article><h3>元の説明</h3><p>{result.input}</p></article><article><h3>修正版仕様</h3><p>{result.repair.specification}</p></article></div><div className="launch-columns"><article><h3>変更理由</h3><ul>{result.repair.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul></article><article><h3>残る制約</h3><ul>{result.repair.limitations.map((r, i) => <li key={i}>{r}</li>)}</ul></article></div><details><summary>機械で読み取れる権限ルール</summary><pre>{JSON.stringify(result.repair.policy, null, 2)}</pre></details></section>}
         {result.checks.length > 0 && <section className="panel launch-section"><p className="eyebrow">RETEST / ACTUAL ENFORCEMENT</p><h2>拒否できた操作・続けられた仕事</h2><div className="launch-table"><table><thead><tr><th>検証</th><th>実際の動作</th><th>適用ルール</th><th>判定</th></tr></thead><tbody>{result.checks.map((c, i) => <tr key={i}><td>{c.name}</td><td>{c.actualAllowed ? "許可" : "拒否"}</td><td><code>{c.rule}</code></td><td>{c.passed ? "合格" : "不合格"}</td></tr>)}</tbody></table></div><p className="field-help">危険操作は再現可能なテスト入力です。初回のシミュレーションは、AIが攻撃に騙された実績ではありません。</p></section>}
         {result.replyChecks && <section className="panel launch-section"><p className="eyebrow">ANSWER REVIEW / SOURCE VERIFICATION</p><h2>回答内容と根拠の照合</h2><p>顧客・注文・返品条件を、許可された参照結果と照合しています。1つでも不一致なら下書きと起動許可を出しません。</p><div className="launch-table"><table><thead><tr><th>確認項目</th><th>検証方法</th><th>結果</th></tr></thead><tbody>{result.replyChecks.map(c => <tr key={c.name}><td>{c.name}</td><td>{c.reason}</td><td>{c.passed ? "一致" : "不一致・作成を停止"}</td></tr>)}</tbody></table></div></section>}
         {result.draft && <section className="panel launch-section"><p className="eyebrow">NORMAL WORK / GEMINI</p><h2>正常業務：返信下書き</h2><p className="launch-draft">{result.draft}</p><p className="field-help">{result.model} が回答項目を抽出し、根拠との一致を確認して定型文へ変換しました。合成データの顧客・注文・返品条件が検証対象です。自由文全般の意味的正確性を保証するものではありません。送信前は人が最終確認してください。</p></section>}
-        {token && <section className="panel launch-section"><p className="eyebrow">LIMITED LAUNCH</p><h2>許可された範囲で動かす</h2><p>署名付き許可は発行から10分間有効。入力変更後は再審査が必要です。以下は合成データでの操作確認です。</p><div className="launch-actions"><button className="button primary" disabled={busy} onClick={() => void execute("draft")}>制限付き起動：下書きを作成</button><button className="button secondary" disabled={busy} onClick={() => void execute("send")}>送信の拒否を確認</button><button className="button secondary" disabled={busy} onClick={() => void execute("delete")}>削除の拒否を確認</button></div><p className="field-help">起動時の下書きは公開FAQを使う定型文です。送信の承認・外部連携は未対応です。</p></section>}
+        {(token || operationResult) && <section className="panel launch-section"><p className="eyebrow">LIMITED LAUNCH</p><h2>許可・拒否の動作を試す</h2><p>署名付き許可は発行から10分間有効。入力変更後は再審査が必要です。下書きは作成でき、送信・削除は拒否されることを確認できます。結果はボタンの下に表示されます。</p><div className="launch-actions"><button className="button primary" disabled={busy || !token} onClick={() => void execute("draft")}>制限付き起動：下書きを作成</button><button className="button secondary" disabled={busy || !token} onClick={() => void execute("send")}>送信の拒否を確認</button><button className="button secondary" disabled={busy || !token} onClick={() => void execute("delete")}>削除の拒否を確認</button></div><div role="status" aria-live="polite" aria-atomic="true" aria-label="操作確認の結果">{operationResult && <div className={`operation-result ${operationResult.state}`}><h3>{operationResult.title}</h3><p>{operationResult.detail}</p>{operationResult.output && <p className="launch-draft">{operationResult.output}</p>}{operationResult.rule && <details><summary>適用されたルール</summary><code>{operationResult.rule}</code><p>この結果は監査ログと保存用JSONにも記録されます。</p></details>}</div>}</div><p className="field-help">起動時の下書きは公開FAQを使う定型文です。送信の承認・外部連携は未対応です。</p></section>}
       </>}
       <section className="panel launch-section"><div className="panel-heading"><div><p className="eyebrow">LIVE ACTIVITY / AUDIT</p><h2>判断と実行の記録</h2></div><button className="button secondary" onClick={download} disabled={!audit.length || busy}>監査JSONを保存</button></div><div className="launch-log" ref={log} role="log" aria-label="監査ログ">{!audit.length && <p>審査を開始すると、操作と適用ルールがここに記録されます。</p>}{audit.map(e => <div key={e.sequence} className={e.allowed ? "" : "denied"}><small>{new Date(e.at).toLocaleTimeString("ja-JP")} / {e.stage}</small><strong>{e.rule === "WORKFLOW" || e.stage === "INPUT" ? "記録" : e.allowed ? "許可" : "拒否"} · {e.rule}</strong><p>{e.action}</p>{e.output && <details><summary>出力</summary><p>{e.output}</p></details>}</div>)}</div></section>
       <footer className="launch-footer">検証対象はGuardian内の隔離環境です。外部の任意のエージェントを停止する機能ではありません。監査記録はページ更新で失われます。必要な記録はJSONで保存してください。</footer>
