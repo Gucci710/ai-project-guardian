@@ -1,36 +1,78 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Project Guardian
 
-## Getting Started
+> AIに仕事を任せる。でも、そのAIの仕事をAIが疑う。
 
-First, run the development server:
+Google Geminiを使い、開発＋QAのプロジェクト計画を独立レビューし、安全な攻撃シミュレーション・防御ルールの修復・同一攻撃の再検証を行う単一ダッシュボードです。
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## ローカル起動
+
+Node.js 22以降を使用します。
+
+```powershell
+npm ci
+Copy-Item .env.example .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`.env.local`に`GEMINI_API_KEY`を設定し、`npm run dev`で起動してください。既存の`.env.local`がある場合は上書きせず必要な変数のみ追加します。ブラウザーで http://localhost:3000 を開きます。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+`GEMINI_MODEL`の既定値は既存実装と同じ`gemini-3.7-flash`です。利用するAPIキーでアクセスできるモデルを指定してください。モデルの利用可否はアカウント・時期によって変わります。キーはサーバーのみで使用し、ビルド時には不要です。
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+混雑・一時的な利用制限時には`GEMINI_FALLBACK_MODEL`（既定`gemini-3.6-flash`）へ切り替えます。変更はログに表示し、以降のAgentと承認後の再開でも使用モデルを保持します。空文字に設定すると切替を無効化できます。どちらも使えない場合はエラーで停止します。認証・入力不備は切替で隠しません。
 
-## Learn More
+## 実装したフロー
 
-To learn more about Next.js, take a look at the following resources:
+1. 仕様・開発人数・QA人数を入力。SmartShopは自作デモ仕様です。
+2. Planningが5領域の作業量・工数・根拠・仮定を生成。サーバーが内訳合計と構造を検証し、人数から営業日を計算。
+3. QA Reviewが元仕様と計画を受け取り、全作業をレビュー。不承認なら1回だけ計画を修正・再レビュー。
+4. 根拠不足や未解決の重大指摘なら`HUMAN REQUIRED`で停止。中信頼なら計画内容を確認して続行を承認。
+5. RED TEAMが攻撃文字列を生成し、隔離した旧版の見積もり更新Agentへ投入。
+6. BLUE TEAMが実結果から防御ルールを作成。そのルールを新しい検証Agentのシステム指示に適用。
+7. RETESTで同じ入力と攻撃文字列を再実行。モデルの拒否判定・提案工数・正式計画の不変をサーバーで確認して`VERIFIED`。
+8. 変更要求に対し2〜3案を生成。ユーザーが人数・仕様全文・トレードオフを確認して選択。
+9. 採用仕様で工数と期間を再計算。変更要求・採用案の条件との照合レビューを行い、成立しなければ停止。成立した計画にQA・攻撃・修復・再検証を実行して`FINAL VERIFIED`。
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+画面の実行ログはNDJSONストリームで受信します。固定の成功シナリオ、固定工数、固定スコアは使用しません。テスト内の合成値は本番APIへ返しません。旧版が攻撃を拒否した場合は侵害を捏造せず、その結果を表示します。
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 指標の意味と制限
 
-## Deploy on Vercel
+- **工数**: 仕様に対してAIが積み上げた作業量。開発・QA・外部連携・セキュリティ・リリース対応を含みます。
+- **期間**: `ceil(開発担当工数 / 開発人数 / 8) + ceil(QA担当工数 / QA人数 / 8) + 調整日数`。工程を順番に実施する保守的な推測です。祝日や個人能力、並行工程は未反映。人数から必要工数は作りません。
+- **Evidence Coverage**: 全作業項目に対する、原仕様内の引用があり推測ではない作業の割合。QA後はQAが支持した項目のみ集計します。引用の存在確認であり、意味や工数の正しさを機械的に証明する指標ではありません。
+- **信頼度**: PlanningとQAの低い評価値を使用。実績データが未登録のため最大85。実測した正解確率ではありません。
+- **自律性**: 信頼度80以上かつCoverage90%以上でAUTONOMOUS。両方60以上はSUPERVISED。未承認・重大指摘・それ未満・再検証失敗はHUMAN REQUIRED。人数・スコープ変更案の採用は常にユーザーが選びます。
+- **Security Battle**: 検証対象は見積もり更新判断の隔離コピーです。第三者システムの攻撃、実アプリコードの自動変更、実資源の追加は行いません。正式計画には攻撃による変更案を反映しません。VERIFIEDは今回のQAと1件の同一攻撃についての確認であり、全攻撃への安全性を示しません。
+- **変更案**: 表示する期間予測は採用前の未検証値です。採用後の再計算結果を変更要求と照合します。元の要求に未達でもユーザーが承認した代替案の条件内で成立する場合は、その差を明示して検証を続けます。採用案自体が成立しない場合は停止します。
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## API
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| API | 用途 |
+| --- | --- |
+| `POST /api/planning` | 単独Planning。specification・projectName・developmentMembers・qaMembersを受信。旧クライアントとの互換用に名前と人数は省略可能（SmartShop / 開発3 / QA2） |
+| `POST /api/guardian` | start / resume / change。各Agentの進行をNDJSONで返す |
+| `GET /api/health` | Geminiを呼ばない起動確認 |
+| `GET /api/gemini-test` | 既存のGemini疎通確認。実API使用量が発生する |
+
+承認待ち・検証済み状態は1時間有効のHMAC署名付きチェックポイントをブラウザーのメモリーに保持します。署名は改変を防止しますが暗号化ではありません。ページ再読み込みで実行状態は失われます。任意の`GUARDIAN_SIGNING_KEY`、未指定ならサーバーのAPIキーで署名します。独立した認証・永続ストレージ・リプレイ防止台帳は未実装なので、Cloud Runは初期設定でIAM認証必須にします。
+
+各Gemini呼び出しは90秒タイムアウト。一時エラーのみモデルごとに1回再試行し、主モデルと代替モデルで合計最大4回までです。429に再試行待ち時間の指定があれば尊重し、60秒を超える場合は同モデルの再試行を行いません。全ワークフローは約28分で停止します。停止後は次のAgentを呼びませんが、送信済みのGemini処理・使用量を取り消すことはできません。
+
+## 検証
+
+```powershell
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+ブラウザー検証は別ターミナルで`npm run dev -- --port 3100`を起動してから`npm run test:browser`を実行します。Windowsではインストール済みChromeを使用します。その他の環境では`npx playwright install chromium`でブラウザーを準備します。ブラウザーテストのAgent応答は合成データです。
+
+`npm run verify:live`は起動済みローカルAPIに自作仕様を送り、実Geminiの開始から最初の停止・承認待ち・完了までを検証します。実APIの使用量が発生します。結果はGit対象外の`artifacts/live-verification.json`に保存します。人の承認は自動では行いません。
+
+制御テストは工数と期間の分離、Coverage、QA拒否、承認待ち、攻撃不成立、再検証失敗、変更後の再検証、署名改変などを合成データで検証します。Geminiの出力品質は別途実APIで確認してください。
+
+## Google Cloud
+
+[Cloud Runへのデプロイ手順](docs/cloud-run.md)に、アカウント・請求先・Secret Manager・Cloud Shellでのビルドと起動方法をまとめています。DockerfileはNext.js standaloneを実行し、`PORT`に追従します。
+
+構造化出力には[Google Gemini公式のJSON Schema機能](https://ai.google.dev/gemini-api/docs/generate-content/structured-output?hl=en)を使用し、アプリ側でも構造と数値を検証しています。
