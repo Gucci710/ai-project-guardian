@@ -3,7 +3,7 @@ import { errorResponse, readBody } from "@/lib/guardian/http";
 import { ValidationError } from "@/lib/guardian/contracts";
 import type { Audit, Event } from "@/lib/launch/contracts";
 import { issuePermit, readPermit } from "@/lib/launch/permit";
-import { createSandbox } from "@/lib/launch/sandbox";
+import { createSandbox, EXPECTED_REPLY } from "@/lib/launch/sandbox";
 import { runLaunch } from "@/lib/launch/workflow";
 
 export const runtime = "nodejs";
@@ -20,10 +20,10 @@ export async function POST(request: Request) {
       const box = createSandbox(policy, "LAUNCH", e => audit.push({ ...e, sequence: audit.length + 1, at: new Date().toISOString() }));
       if (body.operation === "draft") {
         box.execute({ tool: "customer.read", target: "demo-customer", content: "" });
-        const faq = box.execute({ tool: "files.read", target: "faq", content: "" });
-        box.execute({ tool: "mail.draft", target: "demo-customer", content: `お問い合わせありがとうございます。注文DEMO-42についてご案内します。${faq.output}` });
+        box.execute({ tool: "files.read", target: "faq", content: "" });
+        box.execute({ tool: "mail.draft", target: "demo-customer", content: JSON.stringify(EXPECTED_REPLY) });
       } else box.execute({ tool: body.operation === "send" ? "mail.send" : "files.delete", target: body.operation === "send" ? "external@example.invalid" : "faq", content: "合成データでの操作確認" });
-      return Response.json({ audit, allowed: audit.at(-1)?.allowed }, { headers: { "Cache-Control": "no-store" } });
+      return Response.json({ audit, replyChecks: box.replyChecks, allowed: audit.at(-1)?.allowed }, { headers: { "Cache-Control": "no-store" } });
     }
     if (body.kind !== "review" || typeof body.input !== "string" || body.input.trim().length < 5 || body.input.length > 12000) throw new ValidationError("エージェントの説明を5〜12000文字で入力してください。");
     const input = body.input.trim();

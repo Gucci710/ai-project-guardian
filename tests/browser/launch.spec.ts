@@ -3,12 +3,15 @@ import { CAPABILITIES, DEMOS, type Result } from "../../lib/launch/contracts";
 import { SAFE_POLICY, testPolicy } from "../../lib/launch/sandbox";
 import { issuePermit } from "../../lib/launch/permit";
 import { loadEnvConfig } from "@next/env";
+import { verifyReply } from "../../lib/launch/reply";
+import { EXPECTED_REPLY, REPLY_SOURCE } from "../../lib/launch/sandbox";
 
 const result: Result = {
   input: DEMOS.dangerous, model: "UI test fixture", risk: 100, coverage: 67, decision: "LIMITED", audit: [],
   diagnosis: { summary: "合成テストの診断", supported: true, guidance: { task: "問い合わせ対応", questions: [], suggestedSpecification: DEMOS.safe, additionalRisks: [] }, findings: CAPABILITIES.map(capability => ({ capability, status: "danger", quote: "承認は省略したい", reason: "合成テストの根拠" })) },
   repair: { specification: DEMOS.safe, policy: SAFE_POLICY, reasons: ["最小権限"], limitations: ["外部送信・削除は禁止"] },
   checks: testPolicy(SAFE_POLICY, () => {}), draft: "未使用の商品は到着から7日以内に返品申請できます。",
+  replyChecks: verifyReply(EXPECTED_REPLY, REPLY_SOURCE).checks,
 };
 test("起動審査から制限付き操作、入力変更で再審査", async ({ page }) => {
   await page.route("**/api/launch", async route => {
@@ -19,6 +22,8 @@ test("起動審査から制限付き操作、入力変更で再審査", async ({
   await page.goto("/");
   await page.getByRole("button", { name: /設計診断を開始/ }).click();
   await expect(page.getByRole("heading", { name: "正常業務：返信下書き" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "回答内容と根拠の照合" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "一致", exact: true })).toHaveCount(6);
   await page.getByRole("button", { name: "送信の拒否を確認" }).click();
   await expect(page.getByRole("log")).toContainText("SEND_DISABLED_APPROVAL_REQUIRED");
   await page.getByLabel("どんな仕事を任せたいですか？").fill(DEMOS.safe);
@@ -29,6 +34,15 @@ test("API停止時は起動許可を表示しない", async ({ page }) => {
   await page.route("**/api/launch", route => route.fulfill({ contentType: "application/x-ndjson", body: JSON.stringify({ type: "error", message: "Gemini APIが利用できません。" }) + "\n" }));
   await page.goto("/"); await page.getByRole("button", { name: /設計診断を開始/ }).click();
   await expect(page.locator(".launch-error[role=alert]")).toContainText("Gemini APIが利用できません。");
+  await expect(page.getByRole("button", { name: "制限付き起動：下書きを作成" })).toHaveCount(0);
+});
+
+test("回答の誤りを表示し、下書きと起動操作を出さない", async ({ page }) => {
+  const replyChecks = verifyReply({ ...EXPECTED_REPLY, returnDays: 30 }, REPLY_SOURCE).checks;
+  await page.route("**/api/launch", route => route.fulfill({ contentType: "application/x-ndjson", body: JSON.stringify({ type: "result", result: { ...result, decision: "BLOCKED", draft: undefined, replyChecks } }) + "\n" }));
+  await page.goto("/"); await page.getByRole("button", { name: /設計診断を開始/ }).click();
+  await expect(page.getByRole("row").filter({ hasText: "返品期限" })).toContainText("不一致・作成を停止");
+  await expect(page.getByRole("heading", { name: "正常業務：返信下書き" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "制限付き起動：下書きを作成" })).toHaveCount(0);
 });
 
@@ -58,6 +72,7 @@ test("実API: 許可なし拒否、署名付き許可でも送信と削除を拒
     expect(response.ok()).toBe(true);
     const data = await response.json(); expect(data.allowed).toBe(operation === "draft");
     expect(data.audit.length).toBe(operation === "draft" ? 3 : 1);
+    if (operation === "draft") { expect(data.replyChecks).toHaveLength(6); expect(data.replyChecks.every((c: { passed: boolean }) => c.passed)).toBe(true); }
   }
 });
 test("デスクトップ・モバイルの初期画面", async ({ page }) => {

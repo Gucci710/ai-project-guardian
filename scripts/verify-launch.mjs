@@ -29,4 +29,4 @@ await mkdir("artifacts", { recursive: true });
 await writeFile(designOnly ? "artifacts/design-live-verification.json" : "artifacts/launch-live-verification.json", JSON.stringify({ events, operations, failure }, null, 2));
 console.log(JSON.stringify({ decision: result?.decision || "UNVERIFIED", model: result?.model, checks: result?.checks.length, passed: result?.checks.filter(c => c.passed).length, operations: operations.map(o => ({ operation: o.operation, allowed: o.allowed })) }));
 if (designOnly) console.log(JSON.stringify(result?.diagnosis.guidance));
-if (failure || result?.decision !== (designOnly ? "DESIGN_ONLY" : "LIMITED") || (designOnly && (token || !result?.diagnosis.guidance.suggestedSpecification))) process.exitCode = 1;
+if (failure || result?.decision !== (designOnly ? "DESIGN_ONLY" : "LIMITED") || (designOnly && (token || !result?.diagnosis.guidance.suggestedSpecification)) || (!designOnly && (result?.replyChecks?.length !== 6 || result.replyChecks.some(c => !c.passed)))) process.exitCode = 1;
