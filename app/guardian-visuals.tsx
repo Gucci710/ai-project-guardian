@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { MotionSurface } from "./ambient-motion";
 import { launchVerdict } from "@/lib/launch/verdict";
 import type { Audit, Diagnosis, Result } from "@/lib/launch/contracts";
 
@@ -16,7 +17,7 @@ type Tone = "idle" | "danger" | "allowed" | "blocked";
 export function PermissionChamber({ input, diagnosis, result, audit, phase, busy }: { input: string; diagnosis: Diagnosis | null; result: Result | null; audit: Audit[]; phase: string; busy: boolean }) {
   const [mode, setMode] = useState<"design" | "execution">("design");
   const hasExecution = audit.some(e => e.stage === "BEFORE SIMULATION" || e.stage === "WORK TEST") || Boolean(result?.checks.length);
-  return <>{hasExecution && <div className="view-switch" aria-label="審査の表示切替"><button aria-pressed={mode === "design"} onClick={() => setMode("design")}>設計の診断</button><button aria-pressed={mode === "execution"} onClick={() => setMode("execution")}>隔離環境の実行経路</button></div>}{mode === "execution" && hasExecution ? <ExecutionChamber result={result} audit={audit} phase={phase} busy={busy} /> : <DesignChamber result={result} input={input} diagnosis={result?.diagnosis ?? diagnosis} busy={busy} phase={phase} />}</>;
+  return <MotionSurface className="chamber-motion">{hasExecution && <div className="view-switch" aria-label="審査の表示切替"><button aria-pressed={mode === "design"} onClick={() => setMode("design")}>設計の診断</button><button aria-pressed={mode === "execution"} onClick={() => setMode("execution")}>隔離環境の実行経路</button></div>}{mode === "execution" && hasExecution ? <ExecutionChamber result={result} audit={audit} phase={phase} busy={busy} /> : <DesignChamber result={result} input={input} diagnosis={result?.diagnosis ?? diagnosis} busy={busy} phase={phase} />}</MotionSurface>;
 }
 
 function DesignChamber({ result, input, diagnosis, busy, phase }: { result: Result | null; input: string; diagnosis: Diagnosis | null; busy: boolean; phase: string }) {

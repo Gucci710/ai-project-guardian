@@ -105,6 +105,30 @@
 .launch-shell .launch-log .denied strong { color: #ffb1c3; }
 .launch-shell .launch-log p { font-size: 16px; }
 .launch-shell .launch-log:not(:has(> div)) { height: auto; min-height: 110px; }
+.launch-shell .header-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.launch-shell .motion-toggle { gap: 8px; }
+.launch-shell .motion-toggle[aria-pressed=true] { border-color: #86d9d25c; color: #baf5ea; }
+.launch-shell .chamber-motion { flex: 1; }
+/* Small decorative layers: transform/opacity only, never move readable content. */
+.launch-shell .route-map::before { content: ""; position: absolute; width: min(280px, 70%); height: 280px; top: 5%; left: calc(50% - min(140px, 35%)); background: radial-gradient(ellipse, #79d8fb22, transparent 70%); opacity: .5; pointer-events: none; }
+.launch-shell .verdict-stamp { position: relative; overflow: hidden; isolation: isolate; }
+.launch-shell .verdict-stamp::before { content: ""; position: absolute; z-index: -1; width: 96px; height: 96px; top: calc(50% - 48px); left: calc(50% - 48px); border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--verdict) 25%, transparent), transparent 70%); opacity: .4; pointer-events: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .launch-shell .decision-orbit::before { animation: console-orbit 40s linear infinite; }
+  .launch-shell .decision-orbit::after { animation: ambient-counter-orbit 70s linear infinite; }
+  .launch-shell .route-map::before { animation: ambient-drift 16s ease-in-out infinite alternate; }
+  .launch-shell .verdict-stamp::before { animation: ambient-glow 12s ease-in-out infinite alternate; }
+}
+@keyframes ambient-counter-orbit { to { transform: rotate(-360deg); } }
+@keyframes ambient-drift { from { opacity: .35; transform: translateY(-5px); } to { opacity: .8; transform: translateY(5px); } }
+@keyframes ambient-glow { from { opacity: .35; transform: scale(.85); } to { opacity: .8; transform: scale(1.15); } }
+/* Applies to the existing execution wires too. No off-screen rendering work. */
+.launch-shell .motion-surface[data-motion=paused] *,
+.launch-shell .motion-surface[data-motion=paused] *::before,
+.launch-shell .motion-surface[data-motion=paused] *::after,
+.launch-shell[data-motion-enabled=false] *,
+.launch-shell[data-motion-enabled=false] *::before,
+.launch-shell[data-motion-enabled=false] *::after { animation-play-state: paused !important; }
 @media (max-width: 1180px) {
   .launch-shell .mission-grid { display: grid; grid-template-columns: minmax(0, 1fr); }
   .launch-shell .mission-signature { display: none; }

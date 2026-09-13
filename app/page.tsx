@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import "./launch-presentation.css";
+import { MotionSurface } from "./ambient-motion";
 import { launchVerdict } from "@/lib/launch/verdict";
 import { PermissionChamber, PolicyComparison, VerificationOutcome } from "./guardian-visuals";
 import { DEMOS, type Audit, type Diagnosis, type Event, type Result } from "@/lib/launch/contracts";
@@ -12,6 +13,7 @@ const NAMES: Record<string, string> = { "customer.read": "顧客データ", "fil
 export default function LaunchPage() {
   const [input, setInput] = useState<string>(DEMOS.dangerous);
   const [busy, setBusy] = useState(false);
+  const [motionEnabled, setMotionEnabled] = useState(true);
   const [phase, setPhase] = useState("READY");
   const [message, setMessage] = useState("作りたいエージェントを説明してください。");
   const [result, setResult] = useState<Result | null>(null);
@@ -77,10 +79,10 @@ export default function LaunchPage() {
   const verdict = launchVerdict(result, busy, error);
   return <main className={`guardian ${result?.decision === "BLOCKED" || phase === "UNVERIFIED" ? "danger" : result?.decision === "LIMITED" ? "verified" : "repair"}`}>
     <div className="ambient-grid" /><div className="ambient-orb orb-one" />
-    <div className="shell launch-shell">
-      <header className="header"><Link href="/" className="brand"><span className="launch-logo">⬡</span><div>AGENT <strong>GUARDIAN</strong><small>起動許可プロトコル</small></div></Link><Link className="tag" href="/planning">従来のプロジェクト計画</Link></header>
+    <div className="shell launch-shell" data-motion-enabled={motionEnabled}>
+      <header className="header"><Link href="/" className="brand"><span className="launch-logo">⬡</span><div>AGENT <strong>GUARDIAN</strong><small>起動許可プロトコル</small></div></Link><div className="header-tools"><button className="tag motion-toggle" aria-label="画面のアニメーション" aria-pressed={motionEnabled} onClick={() => setMotionEnabled(value => !value)}><span aria-hidden="true">◌</span>演出 {motionEnabled ? "ON" : "OFF"}</button><Link className="tag" href="/planning">従来のプロジェクト計画</Link></div></header>
       <section className="hero"><div><p className="eyebrow">AGENT LAUNCH CONTROL</p><h1>そのエージェントに、<br /><span>起動許可を出せますか。</span></h1><p className="hero-description">危険な権限を見つけ、制限を設計し、実際に止められるか検証する。<br />必要な仕事ができることまで確かめる、AIの起動審査室。</p></div><div className="mission-signature"><span className="eyebrow">THE GUARDIAN PROTOCOL</span><strong>危険を見つける。<br />止められることを、確かめる。</strong><span className="tag">合成データの隔離環境</span></div></section>
-      <section className={`verdict-banner ${verdict.tone}`} aria-label="起動判定" role="status"><div className="verdict-stamp">{verdict.code}</div><div><p className="eyebrow">LAUNCH DECISION</p><h2>{verdict.title}</h2><p>{verdict.reason}</p><p className="verdict-next"><strong>次のアクション：</strong>{verdict.next}</p></div></section>
+      <MotionSurface className="verdict-motion"><section className={`verdict-banner ${verdict.tone}`} aria-label="起動判定" role="status"><div className="verdict-stamp">{verdict.code}</div><div><p className="eyebrow">LAUNCH DECISION</p><h2>{verdict.title}</h2><p>{verdict.reason}</p><p className="verdict-next"><strong>次のアクション：</strong>{verdict.next}</p></div></section></MotionSurface>
       <div className="mission-grid">
         <section className="panel input-panel"><div className="panel-heading"><div><p className="eyebrow">01 / MISSION</p><h2>エージェントの説明</h2></div></div>
           <div className="launch-examples">{([["dangerous", "危険な権限の例"], ["safe", "制限を明記した例"], ["unknown", "短い希望の例"], ["research", "調査エージェントの例"]] as const).map(([key, name]) => <button className="tag" disabled={busy} onClick={() => edit(DEMOS[key])} key={key}>{name}</button>)}</div>
