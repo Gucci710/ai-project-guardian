@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { MotionSurface } from "./ambient-motion";
 import { launchVerdict } from "@/lib/launch/verdict";
-import type { Audit, Diagnosis, Result } from "@/lib/launch/contracts";
+import type { Audit, Capability, Diagnosis, Result } from "@/lib/launch/contracts";
 
 const routes = [
   { id: "customer.read", name: "顧客情報", icon: "◎", position: "customer", path: "M145 55 H235 L315 105", target: "demo-customer" },
@@ -23,11 +23,11 @@ export function PermissionChamber({ input, diagnosis, result, audit, phase, busy
 function DesignChamber({ result, input, diagnosis, busy, phase }: { result: Result | null; input: string; diagnosis: Diagnosis | null; busy: boolean; phase: string }) {
   const [selected, setSelected] = useState(0);
   const verdict = launchVerdict(result, busy, phase === "UNVERIFIED" ? "interrupted" : "");
-  const groups = [
+  const groups: { title: string; ids: Capability[]; lines: string[] }[] = [
     { title: "業務・成果物", ids: [], lines: diagnosis ? [diagnosis.guidance.task, diagnosis.summary] : [input || "任せたい仕事を入力してください。"] },
     { title: "参照データ", ids: ["customer.read", "files.read"], lines: [] },
     { title: "操作権限", ids: ["mail.send", "files.delete"], lines: [] },
-    { title: "承認・停止条件", ids: ["audit", "limits"], lines: diagnosis?.guidance.questions ?? [] },
+    { title: "承認・停止条件", ids: ["audit", "limits"], lines: [] },
     { title: "業務固有のリスク", ids: [], lines: diagnosis?.guidance.additionalRisks ?? [] },
   ];
   const cards = groups.map((group, index) => {
@@ -35,16 +35,16 @@ function DesignChamber({ result, input, diagnosis, busy, phase }: { result: Resu
     const lines = [...group.lines, ...findings.map(f => `${f.reason}${f.quote ? ` 根拠：「${f.quote}」` : ""}`)];
     const danger = findings.some(f => f.status === "danger");
     const unknown = findings.some(f => f.status === "unknown");
-    const label = !diagnosis ? busy ? "診断結果を待っています" : "診断前" : danger ? "NG · 要対策" : unknown ? "PEND · 未確認" : findings.length ? "OK · 制限の記載あり" : index === 4 && group.lines.length ? "REVIEW · 要確認" : "INFO · 診断内容";
+    const label = !diagnosis ? busy ? "診断結果を待っています" : "診断前" : danger ? "NG · 要対策" : unknown ? "PEND · 未確認" : findings.length ? "OK · 制限あり" : index === 4 && group.lines.length ? "REVIEW · 要確認" : "INFO · 診断内容";
     return { ...routes[index], name: group.title, lines, label, tone: danger ? "danger" : unknown || (index === 4 && group.lines.length > 0) ? "pending" : findings.length && diagnosis ? "allowed" : "idle", preview: lines[0] || (diagnosis ? "追加の指摘はありません。安全性の保証ではありません。" : "入力した業務に合わせて確認します。") };
   });
   const active = cards[selected];
   return <div className={`permission-theater design-theater ${busy ? "is-working" : ""}`}>
-    <div className="theater-toolbar"><div><span className="eyebrow">ADAPTIVE DESIGN REVIEW</span><p>{diagnosis ? diagnosis.guidance.task : "入力した要件を5つの観点で診断"}</p></div><span className="tag">{diagnosis ? "設計診断の結果" : busy ? "Geminiが解析中" : "入力プレビュー"}</span></div>
+    <div className="theater-toolbar"><div><span className="eyebrow">ADAPTIVE DESIGN REVIEW</span><p>{diagnosis ? diagnosis.guidance.task : "入力した要件を5つの観点で診断"}</p></div><span className="tag">{diagnosis ? "カード：入力時点の設計" : busy ? "Geminiが解析中" : "入力プレビュー"}</span></div>
     <div className="route-map design-map" aria-label="要件ごとの5大チェック">
       <svg viewBox="0 0 700 330" preserveAspectRatio="none" aria-hidden="true" className="route-wires">{cards.map((card, i) => <g key={card.id} className={`wire ${card.tone}`}><path d={card.path} /><path className="wire-flow" style={{ animationDelay: `${i * -.6}s` }} d={card.path} /></g>)}<ellipse className="boundary-ring" cx="350" cy="115" rx="117" ry="105" /></svg>
       {cards.map((card, i) => <button key={card.id} onClick={() => setSelected(i)} aria-pressed={selected === i} className={`route-node ${card.position} ${card.tone} ${selected === i ? "selected" : ""}`}><span className="node-icon">0{i + 1}</span><strong>{card.name}</strong><span className="check-preview">{card.preview}</span><span className="route-state">{card.label}</span></button>)}
-      <div className={`theater-core decision-core ${verdict.tone}`}><div className="decision-orbit"><strong>{verdict.code}</strong></div><strong>{verdict.title}</strong><small>{busy ? "審査結果を待っています" : "起動判定 / Guardian検証範囲"}</small></div>
+      <div className={`theater-core decision-core ${verdict.tone}`}><div className="decision-orbit"><strong>{verdict.code}</strong></div><div className="core-caption"><strong>{verdict.title}</strong><small>{busy ? "審査結果を待っています" : result?.repair ? "修正後の起動判定" : "起動判定 / Guardian検証範囲"}</small></div></div>
     </div>
     <div className={`route-inspector ${active.tone}`} aria-live="polite"><strong>{active.name}<span>{active.label}</span></strong>{active.lines.length ? active.lines.map((line, i) => <p key={i}>{line}</p>) : <p>{active.preview}</p>}</div>
     <p className="field-help">カードは修正前の設計を評価しています。OKは制限の記載があることを示し、安全性の保証ではありません。修正・検証後の起動可否は中央に表示します。</p>
@@ -85,7 +85,7 @@ function ExecutionChamber({ result, audit, phase, busy }: { result: Result | nul
     <div className="route-map" aria-label="権限とデータの経路図">
       <svg viewBox="0 0 700 330" preserveAspectRatio="none" aria-hidden="true" className="route-wires">{nodes.map(node => <g key={node.id} className={`wire ${node.tone}`}><path d={node.path} /><path className="wire-flow" d={node.path} /></g>)}<ellipse className="boundary-ring" cx="350" cy="115" rx="117" ry="105" /></svg>
       {nodes.map(node => <button key={node.id} className={`route-node ${node.position} ${node.tone} ${selected === node.id ? "selected" : ""}`} onClick={() => setSelected(node.id)} aria-pressed={selected === node.id} aria-label={`${node.name}：${node.label}`}><span className="node-icon" aria-hidden="true">{node.icon}</span><strong>{node.name}</strong><span className="route-state">{node.tone === "blocked" ? "⊘ " : node.tone === "allowed" ? "✓ " : ""}{node.label}</span></button>)}
-      <div className={`theater-core ${verified ? "verified" : ""}`}><div className="core-shield" aria-hidden="true">{verified ? "✓" : "⬡"}</div><strong>{verified ? "VERIFIED" : phase}</strong><small>{view === "before" && result ? "入力内容の診断" : verified ? "検証範囲内で許可" : busy ? "権限と根拠を確認中" : "実行は権限チェックを通過"}</small></div>
+      <div className={`theater-core ${verified ? "verified" : ""}`}><div className="core-shield" aria-hidden="true">{verified ? "✓" : "⬡"}</div><div className="core-caption"><strong>{verified ? "VERIFIED" : phase}</strong><small>{view === "before" && result ? "入力内容の診断" : verified ? "検証範囲内で許可" : busy ? "権限と根拠を確認中" : "実行は権限チェックを通過"}</small></div></div>
     </div>
     <div className={`route-inspector ${active.tone}`} aria-live="polite"><strong>{active.name} <span>{active.label}</span></strong><p>{active.detail}</p></div>
     <div className="route-legend"><span>● 赤：危険な設定</span><span>⊘ 青：実行拒否</span><span>✓ 緑：実行許可</span><span>○ 灰：未検証</span></div>

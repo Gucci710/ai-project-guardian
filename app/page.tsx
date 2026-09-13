@@ -3,7 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import "./launch-presentation.css";
 import { MotionSurface } from "./ambient-motion";
+import { LaunchMetrics } from "./launch-metrics";
 import { launchVerdict } from "@/lib/launch/verdict";
+import { buildReviewReport } from "@/lib/launch/report";
 import { PermissionChamber, PolicyComparison, VerificationOutcome } from "./guardian-visuals";
 import { DEMOS, type Audit, type Diagnosis, type Event, type Result } from "@/lib/launch/contracts";
 
@@ -72,9 +74,17 @@ export default function LaunchPage() {
     } catch (caught) { const detail = controller.signal.aborted ? "確認を中断しました。操作結果は確認できていません。" : caught instanceof Error ? caught.message : "操作に失敗しました。"; setError(detail); setOperationResult({ title: `${action}の確認を完了できませんでした`, detail, state: "error" }); }
     finally { abort.current = null; setBusy(false); }
   }
-  function download() {
-    const url = URL.createObjectURL(new Blob([JSON.stringify({ kind: "Agent Guardian audit export", scope: "design review and optional synthetic sandbox", result, audit }, null, 2)], { type: "application/json" }));
-    const a = document.createElement("a"); a.href = url; a.download = "agent-guardian-audit.json"; a.click(); URL.revokeObjectURL(url);
+  function saveFile(content: string, type: string, filename: string) {
+    const url = URL.createObjectURL(new Blob([content], { type }));
+    const a = document.createElement("a"); a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function downloadAudit() {
+    saveFile(JSON.stringify({ kind: "Agent Guardian audit export", scope: "design review and optional synthetic sandbox", result, audit }, null, 2), "application/json", "agent-guardian-audit.json");
+  }
+  function downloadReport() {
+    if (result) saveFile("\uFEFF" + buildReviewReport(result, audit), "text/plain;charset=utf-8", "agent-guardian-review.txt");
   }
   const verdict = launchVerdict(result, busy, error);
   return <main className={`guardian ${result?.decision === "BLOCKED" || phase === "UNVERIFIED" ? "danger" : result?.decision === "LIMITED" ? "verified" : "repair"}`}>
@@ -93,24 +103,28 @@ export default function LaunchPage() {
         <section className="panel launch-chamber" aria-live="polite"><div className="core-top"><div><p className="eyebrow">02 / PERMISSION CHAMBER</p><h2>起動審査室</h2></div><span className={`tag chamber-status ${busy ? "active" : ""}`}>{busy ? "審査中" : result ? "審査結果" : "入力待ち"}</span></div><PermissionChamber key={input} input={input} diagnosis={diagnosis} result={result} audit={audit} phase={phase} busy={busy} /><p className="launch-message">{message}</p><div className="launch-pipeline">{STAGES.map((s, i) => <span className={visited.includes(s) ? "done" : ""} key={s}><small>0{i + 1} / {s}</small><strong>{STAGE_LABELS[i]}</strong></span>)}</div></section>
       </div>
       {error && <p className="launch-error" role="alert">{error}</p>}
-      <section className="launch-metrics">{[["修正前の危険度", result ? `${result.risk} / 100` : "—"], ["原文根拠の確認率", result ? `${result.coverage}%` : "—"], ["実行検証", result?.checks.length ? `${result.checks.filter(c => c.passed).length} / ${result.checks.length}` : "未実施"], ["起動判定", verdict.title]].map(([label, value]) => <div className="panel" key={label}><p>{label}</p><strong>{value}</strong></div>)}</section>
+      {result && <VerificationOutcome result={result} />}
+      <LaunchMetrics result={result} busy={busy} />
       {result && <>
-        <VerificationOutcome result={result} />
+        <section className="panel launch-section review-delivery" aria-label="診断結果の持ち帰り">
+          <div className="delivery-copy"><p className="eyebrow">REVIEW HANDOFF</p><h2>指摘と改善案を、作る人へ。</h2><p>エージェントの作成依頼者・開発担当者に渡せる、日本語の診断レポートです。次に何を直し、何を確認するかを共有できます。</p><ul className="delivery-contents"><li>危険な設定と入力の原文</li><li>未確認事項・改善案</li><li>審査時の起動判定と検証結果</li></ul></div>
+          <div className="delivery-action"><span className="delivery-format">共有・読み合わせ用 / TXT</span><button className="button primary" onClick={downloadReport} disabled={busy}>診断レポートを保存（テキスト）</button><p className="field-help">お使いの端末に保存します。入力文も含まれます。実行用の許可証ではありません。</p></div>
+        </section>
         <section className="panel launch-section" aria-label="設計診断と次のステップ"><p className="eyebrow">DESIGN REVIEW / NEXT STEP</p><h2>希望を具体的な設計にする</h2><h3>理解した業務</h3><p>{result.diagnosis.guidance.task}</p>
           {result.decision === "DESIGN_ONLY" && <p>この業務の設計診断は完了しています。実行検証用の環境が未対応のため、説明を追記しても現時点では起動許可は発行されません。問い合わせ対応に書き換える必要はありません。</p>}
           {result.diagnosis.guidance.questions.length > 0 && <><h3>確認したいこと・回答例</h3><ol className="guidance-questions">{result.diagnosis.guidance.questions.map((q, i) => <li key={i}>{q}</li>)}</ol></>}
           {result.diagnosis.guidance.additionalRisks.length > 0 && <><h3>この業務で気をつけること</h3><ul>{result.diagnosis.guidance.additionalRisks.map((r, i) => <li key={i}>{r}</li>)}</ul></>}
           <h3>説明の改善案（未確定の提案を含みます）</h3><p className="launch-draft">{result.diagnosis.guidance.suggestedSpecification}</p><button className="button secondary" disabled={busy} onClick={() => { edit(result.diagnosis.guidance.suggestedSpecification); inputRef.current?.focus(); inputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>この案を入力欄で編集する</button><p className="field-help">提案の内容を確認し、【要記入】を埋めてから再診断してください。ボタンを押すだけでは実行・承認されません。</p>
         </section>
-        <section className="panel launch-section"><p className="eyebrow">EVIDENCE / PERMISSION MAP</p><h2>何が危険で、何が未確認か</h2><p>{result.diagnosis.summary}</p><div className="permission-map">{result.diagnosis.findings.map(f => <article key={f.capability} className={`permission-node ${f.status}`}><span className={`tag ${f.status === "danger" ? "red" : f.status === "safe" ? "green" : "amber"}`}>{f.status === "danger" ? "危険" : f.status === "safe" ? "制限あり" : "未確認"}</span><h3>{NAMES[f.capability]}</h3><p>{f.reason}</p>{f.quote && <blockquote>「{f.quote}」</blockquote>}</article>)}</div><details><summary>スコアと確認率の算出規則</summary><p>無承認送信・削除は100、その他の危険は75、未確認は50、明記された制限は0。6項目の最大値を採用。確認率は元入力に一致する4文字以上の引用で裏付けられた項目数÷6です。引用一致は意味の正しさや実環境の安全性を保証しません。</p></details></section>
+        <section id="diagnosis-evidence" className="panel launch-section"><p className="eyebrow">EVIDENCE / PERMISSION MAP</p><h2>何が危険で、何が未確認か</h2><p>修正前の入力への指摘です。各項目に、判断の理由と根拠にした原文を表示しています。</p><p>{result.diagnosis.summary}</p><div className="permission-map">{result.diagnosis.findings.map(f => <article key={f.capability} className={`permission-node ${f.status}`}><span className={`tag ${f.status === "danger" ? "red" : f.status === "safe" ? "green" : "amber"}`}>{f.status === "danger" ? "危険" : f.status === "safe" ? "制限あり" : "未確認"}</span><h3>{NAMES[f.capability]}</h3><p>{f.reason}</p>{f.quote && <blockquote>「{f.quote}」</blockquote>}</article>)}</div></section>
         {result.repair && <section className="panel launch-section"><p className="eyebrow">BEFORE / AFTER</p><h2>安全に実行するための変更案</h2><PolicyComparison result={result} /><p>元の説明から何を変更し、どの操作を制限するかをまとめています。</p><details className="explanation-details"><summary>仕様の全文と変更理由を見る</summary><div className="launch-columns"><article><h3>元の説明</h3><p>{result.input}</p></article><article><h3>修正版仕様</h3><p>{result.repair.specification}</p></article></div><div className="launch-columns"><article><h3>変更理由</h3><ul>{result.repair.reasons.map((r, i) => <li key={i}>{r}</li>)}</ul></article><article><h3>残る制約</h3><ul>{result.repair.limitations.map((r, i) => <li key={i}>{r}</li>)}</ul></article></div></details><details><summary>機械で読み取れる権限ルール</summary><pre>{JSON.stringify(result.repair.policy, null, 2)}</pre></details></section>}
         {result.checks.length > 0 && <section className="panel launch-section"><p className="eyebrow">RETEST / ACTUAL ENFORCEMENT</p><h2>拒否できた操作・続けられた仕事</h2><div className="launch-table"><table><thead><tr><th>検証</th><th>実際の動作</th><th>適用ルール</th><th>判定</th></tr></thead><tbody>{result.checks.map((c, i) => <tr key={i}><td>{c.name}</td><td>{c.actualAllowed ? "許可" : "拒否"}</td><td><code>{c.rule}</code></td><td>{c.passed ? "合格" : "不合格"}</td></tr>)}</tbody></table></div><p className="field-help">危険操作は再現可能なテスト入力です。初回のシミュレーションは、AIが攻撃に騙された実績ではありません。</p></section>}
         {result.replyChecks && <section className="panel launch-section"><p className="eyebrow">ANSWER REVIEW / SOURCE VERIFICATION</p><h2>回答内容と根拠の照合</h2><p>顧客・注文・返品条件を、許可された参照結果と照合しています。1つでも不一致なら下書きと起動許可を出しません。</p><div className="launch-table"><table><thead><tr><th>確認項目</th><th>検証方法</th><th>結果</th></tr></thead><tbody>{result.replyChecks.map(c => <tr key={c.name}><td>{c.name}</td><td>{c.reason}</td><td>{c.passed ? "一致" : "不一致・作成を停止"}</td></tr>)}</tbody></table></div></section>}
         {result.draft && <section className="panel launch-section"><p className="eyebrow">NORMAL WORK / GEMINI</p><h2>正常業務：返信下書き</h2><p className="launch-draft">{result.draft}</p><p className="field-help">{result.model} が回答項目を抽出し、根拠との一致を確認して定型文へ変換しました。合成データの顧客・注文・返品条件が検証対象です。自由文全般の意味的正確性を保証するものではありません。送信前は人が最終確認してください。</p></section>}
         {(token || operationResult) && <section className="panel launch-section"><p className="eyebrow">LIMITED LAUNCH</p><h2>許可・拒否の動作を試す</h2><p>署名付き許可は発行から10分間有効。入力変更後は再審査が必要です。下書きは作成でき、送信・削除は拒否されることを確認できます。結果はボタンの下に表示されます。</p><div className="launch-actions"><button className="button primary" disabled={busy || !token} onClick={() => void execute("draft")}>制限付き起動：下書きを作成</button><button className="button secondary" disabled={busy || !token} onClick={() => void execute("send")}>送信の拒否を確認</button><button className="button secondary" disabled={busy || !token} onClick={() => void execute("delete")}>削除の拒否を確認</button></div><div role="status" aria-live="polite" aria-atomic="true" aria-label="操作確認の結果">{operationResult && <div className={`operation-result ${operationResult.state}`}><h3>{operationResult.title}</h3><p>{operationResult.detail}</p>{operationResult.output && <p className="launch-draft">{operationResult.output}</p>}{operationResult.rule && <details><summary>適用されたルール</summary><code>{operationResult.rule}</code><p>この結果は監査ログと保存用JSONにも記録されます。</p></details>}</div>}</div><p className="field-help">起動時の下書きは公開FAQを使う定型文です。送信の承認・外部連携は未対応です。</p></section>}
       </>}
-      <section className="panel launch-section"><div className="panel-heading"><div><p className="eyebrow">LIVE ACTIVITY / AUDIT</p><h2>判断と実行の記録</h2></div><button className="button secondary" onClick={download} disabled={!audit.length || busy}>監査JSONを保存</button></div><div className="launch-log" ref={log} role="log" aria-label="監査ログ">{!audit.length && <p>審査を開始すると、操作と適用ルールがここに記録されます。</p>}{audit.map(e => <div key={e.sequence} className={e.allowed ? "" : "denied"}><small>{new Date(e.at).toLocaleTimeString("ja-JP")} / {e.stage}</small><strong>{e.rule === "WORKFLOW" || e.stage === "INPUT" ? "記録" : e.allowed ? "許可" : "拒否"} · {e.rule}</strong><p>{e.action}</p>{e.output && <details><summary>出力</summary><p>{e.output}</p></details>}</div>)}</div></section>
-      <footer className="launch-footer">検証対象はGuardian内の隔離環境です。外部の任意のエージェントを停止する機能ではありません。監査記録はページ更新で失われます。必要な記録はJSONで保存してください。</footer>
+      <section className="panel launch-section"><div className="panel-heading"><div><p className="eyebrow">LIVE ACTIVITY / AUDIT</p><h2>判断と実行の記録</h2></div><button className="button secondary" onClick={downloadAudit} disabled={(!audit.length && !result) || busy}>詳細ログを保存（JSON）</button></div><p className="field-help">JSONは開発担当者が判定の理由を追跡し、不具合を調べるための詳細データです。元の入力・診断・修正案・全操作の記録を保存します。内容を人に共有するときは、日本語の診断レポートが便利です。</p><div className="launch-log" ref={log} role="log" aria-label="監査ログ">{!audit.length && <p>審査を開始すると、操作と適用ルールがここに記録されます。</p>}{audit.map(e => <div key={e.sequence} className={e.allowed ? "" : "denied"}><small>{new Date(e.at).toLocaleTimeString("ja-JP")} / {e.stage}</small><strong>{e.rule === "WORKFLOW" || e.stage === "INPUT" ? "記録" : e.allowed ? "許可" : "拒否"} · {e.rule}</strong><p>{e.action}</p>{e.output && <details><summary>出力</summary><p>{e.output}</p></details>}</div>)}</div><p className="field-help">JSONの読み込みによる再開・再実行には対応していません。</p></section>
+      <footer className="launch-footer">検証対象はGuardian内の隔離環境です。外部の任意のエージェントを停止する機能ではありません。診断結果と操作記録はページ更新で失われます。共有用には診断レポート、詳細の保管にはJSONを保存してください。</footer>
     </div>
   </main>;
 }
