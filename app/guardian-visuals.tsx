@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { Audit, Result } from "@/lib/launch/contracts";
+import { launchVerdict } from "@/lib/launch/verdict";
+import type { Audit, Diagnosis, Result } from "@/lib/launch/contracts";
 
 const routes = [
   { id: "customer.read", name: "顧客情報", icon: "◎", position: "customer", path: "M145 55 H235 L315 105", target: "demo-customer" },
@@ -12,7 +13,44 @@ const routes = [
 ];
 type Tone = "idle" | "danger" | "allowed" | "blocked";
 
-export function PermissionChamber({ result, audit, phase, busy }: { result: Result | null; audit: Audit[]; phase: string; busy: boolean }) {
+export function PermissionChamber({ input, diagnosis, result, audit, phase, busy }: { input: string; diagnosis: Diagnosis | null; result: Result | null; audit: Audit[]; phase: string; busy: boolean }) {
+  const [mode, setMode] = useState<"design" | "execution">("design");
+  const hasExecution = audit.some(e => e.stage === "BEFORE SIMULATION" || e.stage === "WORK TEST") || Boolean(result?.checks.length);
+  return <>{hasExecution && <div className="view-switch" aria-label="審査の表示切替"><button aria-pressed={mode === "design"} onClick={() => setMode("design")}>設計の診断</button><button aria-pressed={mode === "execution"} onClick={() => setMode("execution")}>隔離環境の実行経路</button></div>}{mode === "execution" && hasExecution ? <ExecutionChamber result={result} audit={audit} phase={phase} busy={busy} /> : <DesignChamber result={result} input={input} diagnosis={result?.diagnosis ?? diagnosis} busy={busy} phase={phase} />}</>;
+}
+
+function DesignChamber({ result, input, diagnosis, busy, phase }: { result: Result | null; input: string; diagnosis: Diagnosis | null; busy: boolean; phase: string }) {
+  const [selected, setSelected] = useState(0);
+  const verdict = launchVerdict(result, busy, phase === "UNVERIFIED" ? "interrupted" : "");
+  const groups = [
+    { title: "業務・成果物", ids: [], lines: diagnosis ? [diagnosis.guidance.task, diagnosis.summary] : [input || "任せたい仕事を入力してください。"] },
+    { title: "参照データ", ids: ["customer.read", "files.read"], lines: [] },
+    { title: "操作権限", ids: ["mail.send", "files.delete"], lines: [] },
+    { title: "承認・停止条件", ids: ["audit", "limits"], lines: diagnosis?.guidance.questions ?? [] },
+    { title: "業務固有のリスク", ids: [], lines: diagnosis?.guidance.additionalRisks ?? [] },
+  ];
+  const cards = groups.map((group, index) => {
+    const findings = diagnosis?.findings.filter(f => group.ids.includes(f.capability)) ?? [];
+    const lines = [...group.lines, ...findings.map(f => `${f.reason}${f.quote ? ` 根拠：「${f.quote}」` : ""}`)];
+    const danger = findings.some(f => f.status === "danger");
+    const unknown = findings.some(f => f.status === "unknown");
+    const label = !diagnosis ? busy ? "診断結果を待っています" : "診断前" : danger ? "NG · 要対策" : unknown ? "PEND · 未確認" : findings.length ? "OK · 制限の記載あり" : index === 4 && group.lines.length ? "REVIEW · 要確認" : "INFO · 診断内容";
+    return { ...routes[index], name: group.title, lines, label, tone: danger ? "danger" : unknown || (index === 4 && group.lines.length > 0) ? "pending" : findings.length && diagnosis ? "allowed" : "idle", preview: lines[0] || (diagnosis ? "追加の指摘はありません。安全性の保証ではありません。" : "入力した業務に合わせて確認します。") };
+  });
+  const active = cards[selected];
+  return <div className={`permission-theater design-theater ${busy ? "is-working" : ""}`}>
+    <div className="theater-toolbar"><div><span className="eyebrow">ADAPTIVE DESIGN REVIEW</span><p>{diagnosis ? diagnosis.guidance.task : "入力した要件を5つの観点で診断"}</p></div><span className="tag">{diagnosis ? "設計診断の結果" : busy ? "Geminiが解析中" : "入力プレビュー"}</span></div>
+    <div className="route-map design-map" aria-label="要件ごとの5大チェック">
+      <svg viewBox="0 0 700 330" preserveAspectRatio="none" aria-hidden="true" className="route-wires">{cards.map((card, i) => <g key={card.id} className={`wire ${card.tone}`}><path d={card.path} /><path className="wire-flow" style={{ animationDelay: `${i * -.6}s` }} d={card.path} /></g>)}<ellipse className="boundary-ring" cx="350" cy="115" rx="117" ry="105" /></svg>
+      {cards.map((card, i) => <button key={card.id} onClick={() => setSelected(i)} aria-pressed={selected === i} className={`route-node ${card.position} ${card.tone} ${selected === i ? "selected" : ""}`}><span className="node-icon">0{i + 1}</span><strong>{card.name}</strong><span className="check-preview">{card.preview}</span><span className="route-state">{card.label}</span></button>)}
+      <div className={`theater-core decision-core ${verdict.tone}`}><div className="decision-orbit"><strong>{verdict.code}</strong></div><strong>{verdict.title}</strong><small>{busy ? "審査結果を待っています" : "起動判定 / Guardian検証範囲"}</small></div>
+    </div>
+    <div className={`route-inspector ${active.tone}`} aria-live="polite"><strong>{active.name}<span>{active.label}</span></strong>{active.lines.length ? active.lines.map((line, i) => <p key={i}>{line}</p>) : <p>{active.preview}</p>}</div>
+    <p className="field-help">カードは修正前の設計を評価しています。OKは制限の記載があることを示し、安全性の保証ではありません。修正・検証後の起動可否は中央に表示します。</p>
+  </div>;
+}
+
+function ExecutionChamber({ result, audit, phase, busy }: { result: Result | null; audit: Audit[]; phase: string; busy: boolean }) {
   const [view, setView] = useState<"before" | "after">("after");
   const [selected, setSelected] = useState("customer.read");
   const nodes = routes.map(route => {

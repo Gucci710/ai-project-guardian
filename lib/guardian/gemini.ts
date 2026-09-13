@@ -22,17 +22,6 @@ type GeneratorIO = {
   pause?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
 };
 
-function retryWait(error: unknown, status: number): number {
-  if (status !== 429) return 2000;
-  try {
-    const body = JSON.parse((error as Error).message);
-    const detail = body.error?.details?.find((item: { retryDelay?: string }) => item.retryDelay);
-    const seconds = Number.parseFloat(detail?.retryDelay);
-    if (Number.isFinite(seconds) && seconds > 0) return Math.ceil(seconds * 1000);
-  } catch { /* Some SDK errors do not contain RetryInfo. */ }
-  return 15000;
-}
-
 export function createGenerator(signal: AbortSignal, onRetry: (agent: string, message: string) => void, initialModel = modelName(), io: GeneratorIO = {}): Generate {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEYを設定してサーバーを再起動してください。");
@@ -40,9 +29,10 @@ export function createGenerator(signal: AbortSignal, onRetry: (agent: string, me
   const request = io.request ?? ((parameters: GenerateContentParameters) => ai.models.generateContent(parameters));
   const pause = io.pause ?? ((ms: number, abort: AbortSignal) => delay(ms, undefined, { signal: abort }));
   let activeModel = initialModel;
-  const fallback = process.env.GEMINI_FALLBACK_MODEL ?? "gemini-3.6-flash";
+  const configuredFallbacks = process.env.GEMINI_FALLBACK_MODELS ?? process.env.GEMINI_FALLBACK_MODEL ?? "gemini-3.5-flash-lite,gemini-3.1-flash-lite";
+  const models = [...new Set([initialModel, ...configuredFallbacks.split(",").map(model => model.trim())].filter(Boolean))];
   const generate: Generate = async <T>(agent: string, instructions: string, context: unknown, schema: Schema): Promise<T> => {
-    const candidates = [...new Set([activeModel, fallback].filter(Boolean))];
+    const candidates = models.slice(Math.max(0, models.indexOf(activeModel)));
     for (const candidate of candidates) {
     if (candidate !== activeModel) {
       onRetry(agent, `${activeModel}が利用できないため、実モデル ${candidate}へ切り替えます。`);
@@ -69,16 +59,19 @@ export function createGenerator(signal: AbortSignal, onRetry: (agent: string, me
         if (signal.aborted) throw error;
         const status = Number((error as { status?: number }).status);
         const transient = [408, 429, 500, 502, 503, 504].includes(status);
-        const requestedWait = retryWait(error, status);
-        if (attempt === 0 && transient && requestedWait <= 60000) {
-          const ms = requestedWait + Math.floor(Math.random() * 250);
+        const retryableOnSameModel = [408, 500, 502, 503, 504].includes(status);
+        if (attempt === 0 && retryableOnSameModel) {
+          const ms = 2000 + Math.floor(Math.random() * 250);
           onRetry(agent, `${activeModel}: APIエラー (${status})。${Math.round(ms / 1000)}秒待って1回再試行します。`);
           await pause(ms, signal);
           continue;
         }
-        if (transient && candidate !== candidates.at(-1)) break;
+        if ((transient || status === 404) && candidate !== candidates.at(-1)) break;
         if (error instanceof ValidationError) throw error;
-        if (status === 400 || status === 404) throw new Error("Geminiのモデル名またはリクエスト設定を確認してください。GEMINI_MODELで利用可能なモデルを指定できます。");
+        if (status === 400 || status === 404) {
+          console.error("Gemini request rejected", { model: activeModel, status, message: error instanceof Error ? error.message : String(error) });
+          throw new Error("Geminiのモデル名またはリクエスト設定を確認してください。GEMINI_MODELで利用可能なモデルを指定できます。");
+        }
         if (status === 401 || status === 403) throw new Error("Gemini APIの認証または利用権限を確認してください。");
         if (status === 429) throw new Error(`${activeModel}のAPI利用制限 (429) に達しました。Cloud Runへのデプロイでは解消しません。Google AI Studioで割り当てを確認するか、時間をおいて再実行してください。`);
         throw new Error(`${activeModel}の応答を取得できませんでした${status ? ` (HTTP ${status})` : ""}。混雑またはタイムアウトの可能性があります。デプロイは不要です。時間をおいて再実行してください。`);

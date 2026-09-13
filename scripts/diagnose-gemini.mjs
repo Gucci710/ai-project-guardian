@@ -12,7 +12,8 @@ try {
   }
   console.log(JSON.stringify({ availableModels: available }));
 } catch (error) { console.log(JSON.stringify({ operation: "list", status: error.status || "connection-error" })); }
-const fallback = ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-2.5-flash"].find((name) => available.includes(name) && name !== primary);
+const configuredFallbacks = (process.env.GEMINI_FALLBACK_MODELS || process.env.GEMINI_FALLBACK_MODEL || "gemini-3.5-flash-lite,gemini-3.1-flash-lite").split(",").map(name => name.trim()).filter(Boolean);
+const fallback = [...configuredFallbacks, "gemini-3.6-flash", "gemini-3.8-flash"].find((name) => available.includes(name) && name !== primary);
 for (const model of [primary, fallback].filter(Boolean)) {
   try {
     const response = await ai.models.generateContent({ model, contents: "疎通確認です。日本語で一言だけ返してください。", config: { httpOptions: { timeout: 30000, retryOptions: { attempts: 1 } } } });

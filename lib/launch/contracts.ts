@@ -19,7 +19,7 @@ export type Call = { tool: string; target: string; content: string };
 export type Audit = { sequence: number; at: string; stage: string; action: string; allowed: boolean; rule: string; output?: string };
 export type Check = { name: string; call: Call; expectedAllowed: boolean; actualAllowed: boolean; passed: boolean; rule: string };
 export type Result = { input: string; model: string; diagnosis: Diagnosis; risk: number; coverage: number; repair?: Repair; checks: Check[]; replyChecks?: ReplyCheck[]; draft?: string; decision: "BLOCKED" | "UNVERIFIED" | "LIMITED" | "DESIGN_ONLY" | "NEEDS_INPUT"; audit: Audit[] };
-export type Event = { type: "phase"; phase: string; message: string } | { type: "audit"; entry: Audit } | { type: "result"; result: Result; token?: string } | { type: "error"; message: string } | { type: "heartbeat" };
+export type Event = { type: "diagnosis"; diagnosis: Diagnosis } | { type: "phase"; phase: string; message: string } | { type: "audit"; entry: Audit } | { type: "result"; result: Result; token?: string } | { type: "error"; message: string } | { type: "heartbeat" };
 const str: Schema = { type: "string", maxLength: 4000 };
 const object = (properties: Record<string, Schema>): Schema => ({ type: "object", properties, required: Object.keys(properties) });
 const guidanceSchema = object({ task: { ...str, minLength: 1 }, questions: { type: "array", maxItems: 6, items: { ...str, minLength: 1 } }, suggestedSpecification: { ...str, minLength: 5 }, additionalRisks: { type: "array", maxItems: 10, items: { ...str, minLength: 1 } } });

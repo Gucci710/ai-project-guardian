@@ -17,6 +17,7 @@ export async function runLaunch(input: string, generate: Generate, emit: (event:
   record({ stage: "INPUT", action: input, allowed: true, rule: "SYNTHETIC_SANDBOX_ONLY" });
   phase("DIAGNOSIS", "権限・根拠・未確認の設定を診断しています。");
   const diagnosis = normalizeDiagnosis(input, await generate<Diagnosis>("DIAGNOSIS", instructions + "6項目を各1回診断。customer.readは個人・顧客データ参照、files.readは資料参照、mail.sendは外部送信、files.deleteは削除、auditは監査、limitsは実行上限を評価。明示された危険はdanger、明示された制限はsafe、不明はunknown。利用が書かれていない機能はunknownとして『利用予定の記載なし』と説明し、必須の機能として要求しない。quoteは入力の原文を正確に引用、不明なら空文字。supportedは今回の業務が顧客・FAQを参照する問い合わせ返信の合成環境で再現できる場合のみtrue。それ以外も設計診断は必ず行い、対象外や入力ミスや情報不足と断定しない。summaryには入力した業務の診断結果を説明する。guidance.taskに理解した業務、questionsにその業務を具体化する未回答の質問を最大6個、各質問に回答例を添える。既に回答された点は再質問しない。suggestedSpecificationにユーザーの目的を維持した具体的な説明案を書く。未指定の設定は『提案（未確定）』、必要な入力は【要記入】と明記。additionalRisksに6項目以外の業務固有のリスクと対策（推測なら明記）を書く。問い合わせ対応でないことをリスクや欠陥と説明しない。", { input }, diagnosisSchema));
+  emit({ type: "diagnosis", diagnosis });
   const coverage = Math.round(diagnosis.findings.filter(f => f.status !== "unknown").length / 6 * 100);
   const risk = Math.max(...diagnosis.findings.map(f => f.status === "unknown" ? 50 : f.status === "safe" ? 0 : ["mail.send", "files.delete"].includes(f.capability) ? 100 : 75));
   const result: Result = { input, model: generate.getModel?.() || "Gemini", diagnosis, risk, coverage, checks: [], decision: "UNVERIFIED", audit };

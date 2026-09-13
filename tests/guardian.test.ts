@@ -164,25 +164,35 @@ test("一時的な503では実モデルを切り替え、後続Agentもそのモ
   }
 });
 
-test("429のRetryInfoを尊重し、認証エラーは再試行やモデル切替をしない", async () => {
+test("429では待たずに複数の代替モデルへ切り替え、認証エラーは切り替えない", async () => {
   const previous = process.env.GEMINI_API_KEY;
+  const previousFallback = process.env.GEMINI_FALLBACK_MODEL;
+  const previousFallbacks = process.env.GEMINI_FALLBACK_MODELS;
   process.env.GEMINI_API_KEY = "synthetic-test-key";
+  delete process.env.GEMINI_FALLBACK_MODEL;
+  process.env.GEMINI_FALLBACK_MODELS = "test-fallback,test-last";
   try {
     const waits: number[] = [];
-    let attempts = 0;
+    const calls: string[] = [];
     const generate = createGenerator(new AbortController().signal, () => {}, "test-primary", {
-      request: async () => {
-        if (++attempts === 1) throw Object.assign(new Error(JSON.stringify({ error: { details: [{ retryDelay: "23s" }] } })), { status: 429 });
+      request: async ({ model }) => {
+        calls.push(model);
+        if (model !== "test-last") throw Object.assign(new Error("quota exceeded"), { status: 429 });
         return { text: '"ok"' };
       }, pause: async (ms) => { waits.push(ms); },
     });
     assert.equal(await generate("test", "", {}, { type: "string" }), "ok");
-    assert.ok(waits[0] >= 23000 && waits[0] < 24000);
-    attempts = 0;
+    assert.deepEqual(calls, ["test-primary", "test-fallback", "test-last"]);
+    assert.deepEqual(waits, []);
+    let attempts = 0;
     const denied = createGenerator(new AbortController().signal, () => {}, "test-primary", {
       request: async () => { attempts++; throw Object.assign(new Error("denied"), { status: 403 }); }, pause: async () => {},
     });
     await assert.rejects(denied("test", "", {}, { type: "string" }), /認証/);
     assert.equal(attempts, 1);
-  } finally { if (previous === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = previous; }
+  } finally {
+    if (previous === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY = previous;
+    if (previousFallback === undefined) delete process.env.GEMINI_FALLBACK_MODEL; else process.env.GEMINI_FALLBACK_MODEL = previousFallback;
+    if (previousFallbacks === undefined) delete process.env.GEMINI_FALLBACK_MODELS; else process.env.GEMINI_FALLBACK_MODELS = previousFallbacks;
+  }
 });

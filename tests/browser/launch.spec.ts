@@ -25,6 +25,7 @@ test("起動審査から制限付き操作、入力変更で再審査", async ({
   await expect(page.getByRole("heading", { name: "回答内容と根拠の照合" })).toBeVisible();
   await expect(page.getByRole("cell", { name: "一致", exact: true })).toHaveCount(6);
   await expect(page.getByRole("region", { name: "検証結果の要約" })).toContainText("危険な操作を止め、必要な仕事を完了。");
+  await page.getByRole("button", { name: "隔離環境の実行経路", exact: true }).click();
   await expect(page.getByRole("button", { name: "メール送信：実行を拒否" })).toBeVisible();
   await page.getByRole("button", { name: "メール送信：実行を拒否" }).click();
   await expect(page.locator(".route-inspector")).toContainText("SEND_DISABLED_APPROVAL_REQUIRED");
@@ -46,6 +47,24 @@ test("起動審査から制限付き操作、入力変更で再審査", async ({
   await expect(page.getByRole("button", { name: "制限付き起動：下書きを作成" })).toHaveCount(0);
   await expect(page.getByText("入力変更後は再審査が必要です。")).toBeVisible();
 });
+test("調査業務でも5大チェックに固有の診断とリスクを表示する", async ({ page }) => {
+  const research = { ...result, input: DEMOS.research, decision: "DESIGN_ONLY", checks: [], repair: undefined, diagnosis: { ...result.diagnosis, supported: false, guidance: { task: "競合製品の比較レポート", questions: ["参照する公開URLは？"], suggestedSpecification: DEMOS.research, additionalRisks: ["古い価格情報を引用するリスク。更新日を確認する。"] } } };
+  await page.route("**/api/launch", route => route.fulfill({ contentType: "application/x-ndjson", body: JSON.stringify({ type: "result", result: research }) + "\n" }));
+  await page.goto("/");
+  await page.getByLabel("どんな仕事を任せたいですか？").fill(DEMOS.research);
+  await expect(page.locator(".design-theater")).toContainText("比較レポート");
+  await page.getByRole("button", { name: /設計診断を開始/ }).click();
+  await expect(page.locator(".design-theater .theater-toolbar")).toContainText("競合製品の比較レポート");
+  await expect(page.getByRole("status", { name: "起動判定", exact: true })).toContainText("判定保留");
+  await expect(page.getByRole("status", { name: "起動判定", exact: true })).toContainText("説明の追記だけでは解除できません");
+  await expect(page.getByRole("button", { name: "5大チェック", exact: true })).toHaveCount(0);
+  await page.locator(".design-theater .route-node").filter({ hasText: "業務固有のリスク" }).click();
+  await expect(page.locator(".route-inspector")).toContainText("古い価格情報");
+  await expect(page.getByRole("button", { name: "隔離環境の実行経路", exact: true })).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator(".design-theater .route-node")).toHaveCount(5);
+});
+
 test("API停止時は起動許可を表示しない", async ({ page }) => {
   await page.route("**/api/launch", route => route.fulfill({ contentType: "application/x-ndjson", body: JSON.stringify({ type: "error", message: "Gemini APIが利用できません。" }) + "\n" }));
   await page.goto("/"); await page.getByRole("button", { name: /設計診断を開始/ }).click();
@@ -89,9 +108,9 @@ test("一般業務の設計診断で回答例と改善案を表示し、編集�
   await page.getByRole("button", { name: "調査エージェントの例" }).click();
   await page.getByRole("button", { name: /設計診断を開始/ }).click();
   await expect(page.getByRole("heading", { name: "確認したいこと・回答例" })).toBeVisible();
-  await expect(page.getByText("対象サイトはどこですか？（例：指定した公式サイトだけ）")).toBeVisible();
+  await expect(page.getByRole("region", { name: "設計診断と次のステップ" }).getByText("対象サイトはどこですか？（例：指定した公式サイトだけ）")).toBeVisible();
   await expect(page.getByText("起動禁止", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "メール送信：未検証" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "メール送信：未検証" })).toHaveCount(0);
   await expect(page.getByRole("region", { name: "検証結果の要約" })).toContainText("実行の安全性は未検証");
   await expect(page.getByRole("button", { name: "制限付き起動：下書きを作成" })).toHaveCount(0);
   await page.getByRole("button", { name: "この案を入力欄で編集する" }).click();
@@ -115,10 +134,18 @@ test("実API: 許可なし拒否、署名付き許可でも送信と削除を拒
 });
 test("デスクトップ・モバイルの初期画面", async ({ page }) => {
   const errors: string[] = []; page.on("pageerror", e => errors.push(e.message));
-  for (const width of [1440, 390]) {
+  for (const width of [1440, 1024, 390, 320]) {
     await page.setViewportSize({ width, height: 1000 }); await page.goto("/");
     await expect(page.getByRole("heading", { name: /そのエージェントに/ })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const core = await page.locator(".decision-core").boundingBox();
+    for (const card of await page.locator(".design-map .route-node").all()) {
+      const box = await card.boundingBox();
+      expect(Boolean(core && box && box.x < core.x + core.width && box.x + box.width > core.x && box.y < core.y + core.height && box.y + box.height > core.y)).toBe(false);
+    }
+    for (const selector of [".route-state", ".field-help", ".brand small", ".launch-pipeline small"]) {
+      expect(await page.locator(selector).first().evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(13);
+    }
     await page.screenshot({ path: `artifacts/launch-${width}.png`, fullPage: true, animations: "disabled" });
   }
   expect(errors).toEqual([]);

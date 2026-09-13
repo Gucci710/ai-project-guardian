@@ -1,10 +1,13 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import "./launch-presentation.css";
+import { launchVerdict } from "@/lib/launch/verdict";
 import { PermissionChamber, PolicyComparison, VerificationOutcome } from "./guardian-visuals";
-import { DEMOS, type Audit, type Event, type Result } from "@/lib/launch/contracts";
+import { DEMOS, type Audit, type Diagnosis, type Event, type Result } from "@/lib/launch/contracts";
 
 const STAGES = ["DIAGNOSIS", "RED TEAM", "SELF REPAIR", "RETEST", "WORK TEST", "VERIFIED"];
+const STAGE_LABELS = ["設計を診断", "危険を再現", "権限を修正", "制限を検証", "業務を確認", "起動を判定"];
 const NAMES: Record<string, string> = { "customer.read": "顧客データ", "files.read": "資料の参照", "mail.send": "外部送信", "files.delete": "ファイル削除", audit: "監査記録", limits: "実行上限" };
 export default function LaunchPage() {
   const [input, setInput] = useState<string>(DEMOS.dangerous);
@@ -12,6 +15,7 @@ export default function LaunchPage() {
   const [phase, setPhase] = useState("READY");
   const [message, setMessage] = useState("作りたいエージェントを説明してください。");
   const [result, setResult] = useState<Result | null>(null);
+  const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null);
   const [audit, setAudit] = useState<Audit[]>([]);
   const [token, setToken] = useState("");
   const [error, setError] = useState("");
@@ -22,15 +26,17 @@ export default function LaunchPage() {
   const log = useRef<HTMLDivElement | null>(null);
   useEffect(() => () => abort.current?.abort(), []);
   useEffect(() => { if (log.current) log.current.scrollTop = log.current.scrollHeight; }, [audit]);
-  function edit(value: string) { setInput(value); setToken(""); setResult(null); setAudit([]); setPhase("READY"); setVisited([]); setError(""); setOperationResult(null); setMessage("入力変更後は再審査が必要です。"); }
+  function edit(value: string) { setDiagnosis(null); setInput(value); setToken(""); setResult(null); setAudit([]); setPhase("READY"); setVisited([]); setError(""); setOperationResult(null); setMessage("入力変更後は再審査が必要です。"); }
   async function review() {
     if (abort.current) return;
     const controller = new AbortController(); abort.current = controller;
+    setDiagnosis(null);
     setBusy(true); setResult(null); setAudit([]); setToken(""); setError(""); setOperationResult(null); setVisited([]); setPhase("DIAGNOSIS"); setMessage("Geminiに接続しています…");
     let completed = false;
     function receive(line: string) {
       if (!line.trim()) return;
       const event = JSON.parse(line) as Event;
+      if (event.type === "diagnosis") setDiagnosis(event.diagnosis);
       if (event.type === "phase") { setPhase(event.phase); setMessage(event.message); setVisited(v => [...new Set([...v, event.phase])]); }
       if (event.type === "audit") setAudit(a => [...a, event.entry]);
       if (event.type === "result") { setResult(event.result); setToken(event.token || ""); completed = true; }
@@ -68,11 +74,13 @@ export default function LaunchPage() {
     const url = URL.createObjectURL(new Blob([JSON.stringify({ kind: "Agent Guardian audit export", scope: "design review and optional synthetic sandbox", result, audit }, null, 2)], { type: "application/json" }));
     const a = document.createElement("a"); a.href = url; a.download = "agent-guardian-audit.json"; a.click(); URL.revokeObjectURL(url);
   }
+  const verdict = launchVerdict(result, busy, error);
   return <main className={`guardian ${result?.decision === "BLOCKED" || phase === "UNVERIFIED" ? "danger" : result?.decision === "LIMITED" ? "verified" : "repair"}`}>
     <div className="ambient-grid" /><div className="ambient-orb orb-one" />
     <div className="shell launch-shell">
       <header className="header"><Link href="/" className="brand"><span className="launch-logo">⬡</span><div>AGENT <strong>GUARDIAN</strong><small>起動許可プロトコル</small></div></Link><Link className="tag" href="/planning">従来のプロジェクト計画</Link></header>
-      <section className="hero"><div><p className="eyebrow">AGENT LAUNCH CONTROL</p><h1>そのエージェントに、<br /><span>起動許可を出せますか。</span></h1><p className="hero-description">危険な権限を見つけ、制限を設計し、実際に止められるか検証する。<br />必要な仕事ができることまで確かめる、AIの起動審査室。</p></div><span className="tag">合成データの隔離環境</span></section>
+      <section className="hero"><div><p className="eyebrow">AGENT LAUNCH CONTROL</p><h1>そのエージェントに、<br /><span>起動許可を出せますか。</span></h1><p className="hero-description">危険な権限を見つけ、制限を設計し、実際に止められるか検証する。<br />必要な仕事ができることまで確かめる、AIの起動審査室。</p></div><div className="mission-signature"><span className="eyebrow">THE GUARDIAN PROTOCOL</span><strong>危険を見つける。<br />止められることを、確かめる。</strong><span className="tag">合成データの隔離環境</span></div></section>
+      <section className={`verdict-banner ${verdict.tone}`} aria-label="起動判定" role="status"><div className="verdict-stamp">{verdict.code}</div><div><p className="eyebrow">LAUNCH DECISION</p><h2>{verdict.title}</h2><p>{verdict.reason}</p><p className="verdict-next"><strong>次のアクション：</strong>{verdict.next}</p></div></section>
       <div className="mission-grid">
         <section className="panel input-panel"><div className="panel-heading"><div><p className="eyebrow">01 / MISSION</p><h2>エージェントの説明</h2></div></div>
           <div className="launch-examples">{([["dangerous", "危険な権限の例"], ["safe", "制限を明記した例"], ["unknown", "短い希望の例"], ["research", "調査エージェントの例"]] as const).map(([key, name]) => <button className="tag" disabled={busy} onClick={() => edit(DEMOS[key])} key={key}>{name}</button>)}</div>
@@ -80,10 +88,10 @@ export default function LaunchPage() {
           {busy && <button className="button stop" onClick={() => abort.current?.abort()}>実行を停止</button>}
           <p className="field-help">設計診断はどの業務でも利用できます。実行検証は現在、問い合わせ返信の合成環境のみ対応しています。</p><p className="field-help">Geminiによる診断・修正・業務検証。AI呼び出し最大5回（再試行・モデル切替を含め最大20リクエスト）、全体9分。各隔離実行は最大10操作。実データや機密情報は入力しないでください。</p>
         </section>
-        <section className="panel launch-chamber" aria-live="polite"><div className="core-top"><p className="eyebrow">02 / PERMISSION CHAMBER</p><span className="tag">{busy ? "審査中" : "待機・結果"}</span></div><PermissionChamber key={input} result={result} audit={audit} phase={phase} busy={busy} /><p className="launch-message">{message}</p><div className="launch-pipeline">{STAGES.map((s, i) => <span className={visited.includes(s) ? "done" : ""} key={s}><small>0{i + 1}</small>{s}</span>)}</div></section>
+        <section className="panel launch-chamber" aria-live="polite"><div className="core-top"><div><p className="eyebrow">02 / PERMISSION CHAMBER</p><h2>起動審査室</h2></div><span className={`tag chamber-status ${busy ? "active" : ""}`}>{busy ? "審査中" : result ? "審査結果" : "入力待ち"}</span></div><PermissionChamber key={input} input={input} diagnosis={diagnosis} result={result} audit={audit} phase={phase} busy={busy} /><p className="launch-message">{message}</p><div className="launch-pipeline">{STAGES.map((s, i) => <span className={visited.includes(s) ? "done" : ""} key={s}><small>0{i + 1} / {s}</small><strong>{STAGE_LABELS[i]}</strong></span>)}</div></section>
       </div>
       {error && <p className="launch-error" role="alert">{error}</p>}
-      <section className="launch-metrics">{[["設計上の危険度", result ? `${result.risk} / 100` : "—"], ["原文根拠の確認率", result ? `${result.coverage}%` : "—"], ["実行検証", result ? `${result.checks.filter(c => c.passed).length} / ${result.checks.length}` : "—"], ["起動判定", result ? result.decision === "LIMITED" ? "制限付き許可" : result.decision === "DESIGN_ONLY" ? "実行検証未対応" : result.decision === "NEEDS_INPUT" ? "確認事項あり" : "起動禁止" : "未検証"]].map(([label, value]) => <div className="panel" key={label}><p>{label}</p><strong>{value}</strong></div>)}</section>
+      <section className="launch-metrics">{[["修正前の危険度", result ? `${result.risk} / 100` : "—"], ["原文根拠の確認率", result ? `${result.coverage}%` : "—"], ["実行検証", result?.checks.length ? `${result.checks.filter(c => c.passed).length} / ${result.checks.length}` : "未実施"], ["起動判定", verdict.title]].map(([label, value]) => <div className="panel" key={label}><p>{label}</p><strong>{value}</strong></div>)}</section>
       {result && <>
         <VerificationOutcome result={result} />
         <section className="panel launch-section" aria-label="設計診断と次のステップ"><p className="eyebrow">DESIGN REVIEW / NEXT STEP</p><h2>希望を具体的な設計にする</h2><h3>理解した業務</h3><p>{result.diagnosis.guidance.task}</p>
