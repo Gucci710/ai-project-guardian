@@ -1,4 +1,4 @@
-import { validate, type Schema } from "../guardian/contracts";
+import { validate, type Schema } from "./validation";
 
 export type ReplyFacts = { customerId: string; customerName: string; orderId: string; returnDays: number; unusedOnly: boolean; customerEvidence: string; faqEvidence: string };
 export type ReplyCheck = { name: string; passed: boolean; reason: string };

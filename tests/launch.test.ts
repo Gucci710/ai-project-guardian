@@ -4,7 +4,7 @@ import { CAPABILITIES, DEMOS, type Diagnosis, type Repair } from "../lib/launch/
 import { createSandbox, SAFE_POLICY, testPolicy, EXPECTED_REPLY } from "../lib/launch/sandbox";
 import { issuePermit, readPermit } from "../lib/launch/permit";
 import { normalizeDiagnosis, runLaunch } from "../lib/launch/workflow";
-import type { Generate } from "../lib/guardian/gemini";
+import type { Generate } from "../lib/launch/gemini";
 import { verifyReply } from "../lib/launch/reply";
 import { REPLY_SOURCE } from "../lib/launch/sandbox";
 

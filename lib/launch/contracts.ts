@@ -1,4 +1,4 @@
-import type { Schema } from "../guardian/contracts";
+import type { Schema } from "./validation";
 import type { ReplyCheck } from "./reply";
 
 export const DEMOS = {

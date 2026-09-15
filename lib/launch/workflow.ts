@@ -1,5 +1,5 @@
-import { validate, ValidationError } from "../guardian/contracts";
-import type { Generate } from "../guardian/gemini";
+import type { Generate } from "./gemini";
+import { validate, ValidationError } from "./validation";
 import { CAPABILITIES, diagnosisSchema, repairSchema, workSchema, type Audit, type Call, type Diagnosis, type Event, type Repair, type Result } from "./contracts";
 import { createSandbox, FIXTURE, policyProblems, testPolicy } from "./sandbox";
 import { replySchema } from "./reply";

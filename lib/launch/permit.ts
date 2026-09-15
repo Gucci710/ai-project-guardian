@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { ValidationError, validate } from "../guardian/contracts";
+import { ValidationError, validate } from "./validation";
 import { policySchema, type Policy } from "./contracts";
 import { policyProblems } from "./sandbox";
 

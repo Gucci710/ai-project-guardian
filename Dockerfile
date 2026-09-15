@@ -19,7 +19,6 @@ ENV HOSTNAME=0.0.0.0
 RUN addgroup --system --gid 1001 guardian && adduser --system --uid 1001 guardian
 COPY --from=builder --chown=guardian:guardian /app/.next/standalone ./
 COPY --from=builder --chown=guardian:guardian /app/.next/static ./.next/static
-COPY --from=builder --chown=guardian:guardian /app/public ./public
 USER guardian
 EXPOSE 8080
 CMD ["node", "server.js"]

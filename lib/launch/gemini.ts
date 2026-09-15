@@ -1,6 +1,6 @@
 import { GoogleGenAI, type GenerateContentParameters } from "@google/genai";
 import { setTimeout as delay } from "node:timers/promises";
-import { type Schema, ValidationError, validate } from "./contracts";
+import { type Schema, ValidationError, validate } from "./validation";
 
 export const modelName = () => process.env.GEMINI_MODEL || "gemini-3.7-flash";
 export type Generate = (<T>(agent: string, instructions: string, context: unknown, schema: Schema) => Promise<T>) & { getModel?: () => string };

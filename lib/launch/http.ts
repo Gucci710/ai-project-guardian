@@ -1,4 +1,4 @@
-import { ValidationError } from "./contracts";
+import { ValidationError } from "./validation";
 
 export async function readBody(request: Request): Promise<Record<string, unknown>> {
   const origin = request.headers.get("origin");

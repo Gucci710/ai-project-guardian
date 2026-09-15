@@ -9,9 +9,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit --incremental false",
     "test:browser": "playwright test",
-    "verify:live": "node scripts/verify-live.mjs",
     "verify:launch": "node scripts/verify-launch.mjs",
-    "test": "tsc --module commonjs --moduleResolution node --target ES2022 --esModuleInterop --skipLibCheck --outDir .test-build tests/guardian.test.ts tests/launch.test.ts tests/report.test.ts && node --test .test-build/tests/guardian.test.js .test-build/tests/launch.test.js .test-build/tests/report.test.js"
+    "test": "tsc --module commonjs --moduleResolution node --target ES2022 --esModuleInterop --skipLibCheck --outDir .test-build tests/launch.test.ts tests/report.test.ts && node --test .test-build/tests/launch.test.js .test-build/tests/report.test.js"
   },
   "dependencies": {
     "@google/genai": "^2.21.0",
