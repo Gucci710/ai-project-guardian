@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { MotionSurface } from "./ambient-motion";
-import { launchVerdict } from "@/lib/launch/verdict";
+import type { LaunchVerdict } from "@/lib/launch/verdict";
 import type { Audit, Capability, Diagnosis, Result } from "@/lib/launch/contracts";
 
 const routes = [
@@ -14,15 +14,14 @@ const routes = [
 ];
 type Tone = "idle" | "danger" | "allowed" | "blocked";
 
-export function PermissionChamber({ input, diagnosis, result, audit, phase, busy }: { input: string; diagnosis: Diagnosis | null; result: Result | null; audit: Audit[]; phase: string; busy: boolean }) {
+export function PermissionChamber({ input, diagnosis, result, audit, verdict, busy }: { input: string; diagnosis: Diagnosis | null; result: Result | null; audit: Audit[]; verdict: LaunchVerdict; busy: boolean }) {
   const [mode, setMode] = useState<"design" | "execution">("design");
   const hasExecution = audit.some(e => e.stage === "BEFORE SIMULATION" || e.stage === "WORK TEST") || Boolean(result?.checks.length);
-  return <MotionSurface className="chamber-motion">{hasExecution && <div className="view-switch" aria-label="審査の表示切替"><button aria-pressed={mode === "design"} onClick={() => setMode("design")}>設計の診断</button><button aria-pressed={mode === "execution"} onClick={() => setMode("execution")}>隔離環境の実行経路</button></div>}{mode === "execution" && hasExecution ? <ExecutionChamber result={result} audit={audit} phase={phase} busy={busy} /> : <DesignChamber result={result} input={input} diagnosis={result?.diagnosis ?? diagnosis} busy={busy} phase={phase} />}</MotionSurface>;
+  return <MotionSurface className="chamber-motion">{hasExecution && <div className="view-switch" aria-label="審査の表示切替"><button aria-pressed={mode === "design"} onClick={() => setMode("design")}>設計の診断</button><button aria-pressed={mode === "execution"} onClick={() => setMode("execution")}>隔離環境の実行経路</button></div>}{mode === "execution" && hasExecution ? <ExecutionChamber result={result} audit={audit} verdict={verdict} busy={busy} /> : <DesignChamber result={result} input={input} diagnosis={result?.diagnosis ?? diagnosis} busy={busy} verdict={verdict} />}</MotionSurface>;
 }
 
-function DesignChamber({ result, input, diagnosis, busy, phase }: { result: Result | null; input: string; diagnosis: Diagnosis | null; busy: boolean; phase: string }) {
+function DesignChamber({ result, input, diagnosis, busy, verdict }: { result: Result | null; input: string; diagnosis: Diagnosis | null; busy: boolean; verdict: LaunchVerdict }) {
   const [selected, setSelected] = useState(0);
-  const verdict = launchVerdict(result, busy, phase === "UNVERIFIED" ? "interrupted" : "");
   const groups: { title: string; ids: Capability[]; lines: string[] }[] = [
     { title: "業務・成果物", ids: [], lines: diagnosis ? [diagnosis.guidance.task, diagnosis.summary] : [input || "任せたい仕事を入力してください。"] },
     { title: "参照データ", ids: ["customer.read", "files.read"], lines: [] },
@@ -51,7 +50,7 @@ function DesignChamber({ result, input, diagnosis, busy, phase }: { result: Resu
   </div>;
 }
 
-function ExecutionChamber({ result, audit, phase, busy }: { result: Result | null; audit: Audit[]; phase: string; busy: boolean }) {
+function ExecutionChamber({ result, audit, verdict, busy }: { result: Result | null; audit: Audit[]; verdict: LaunchVerdict; busy: boolean }) {
   const [view, setView] = useState<"before" | "after">("after");
   const [selected, setSelected] = useState("customer.read");
   const nodes = routes.map(route => {
@@ -79,13 +78,13 @@ function ExecutionChamber({ result, audit, phase, busy }: { result: Result | nul
     return { ...route, tone, label, detail };
   });
   const active = nodes.find(n => n.id === selected)!;
-  const verified = result?.decision === "LIMITED" && view === "after";
+  const verified = verdict.code === "GO" && view === "after";
   return <div className={`permission-theater ${busy ? "is-working" : ""}`}>
     <div className="theater-toolbar"><div><span className="eyebrow">TRUST BOUNDARY</span><p>データと操作の経路</p></div>{result && <div className="view-switch" aria-label="経路図の表示切替"><button aria-pressed={view === "before"} onClick={() => setView("before")}>診断した設定</button><button aria-pressed={view === "after"} onClick={() => setView("after")}>実行検証の結果</button></div>}</div>
     <div className="route-map" aria-label="権限とデータの経路図">
       <svg viewBox="0 0 700 330" preserveAspectRatio="none" aria-hidden="true" className="route-wires">{nodes.map(node => <g key={node.id} className={`wire ${node.tone}`}><path d={node.path} /><path className="wire-flow" d={node.path} /></g>)}<ellipse className="boundary-ring" cx="350" cy="115" rx="117" ry="105" /></svg>
       {nodes.map(node => <button key={node.id} className={`route-node ${node.position} ${node.tone} ${selected === node.id ? "selected" : ""}`} onClick={() => setSelected(node.id)} aria-pressed={selected === node.id} aria-label={`${node.name}：${node.label}`}><span className="node-icon" aria-hidden="true">{node.icon}</span><strong>{node.name}</strong><span className="route-state">{node.tone === "blocked" ? "⊘ " : node.tone === "allowed" ? "✓ " : ""}{node.label}</span></button>)}
-      <div className={`theater-core ${verified ? "verified" : ""}`}><div className="core-shield" aria-hidden="true">{verified ? "✓" : "⬡"}</div><div className="core-caption"><strong>{verified ? "VERIFIED" : phase}</strong><small>{view === "before" && result ? "入力内容の診断" : verified ? "検証範囲内で許可" : busy ? "権限と根拠を確認中" : "実行は権限チェックを通過"}</small></div></div>
+      <div className={`theater-core ${verdict.tone} ${verified ? "verified" : ""}`}><div className="core-shield" aria-hidden="true">{verified ? "✓" : "⬡"}</div><div className="core-caption"><strong>{verified ? "VERIFIED" : verdict.code}</strong><small>{view === "before" && result ? "入力内容の診断" : verified ? "検証範囲内で許可" : busy ? "権限と根拠を確認中" : verdict.title}</small></div></div>
     </div>
     <div className={`route-inspector ${active.tone}`} aria-live="polite"><strong>{active.name} <span>{active.label}</span></strong><p>{active.detail}</p></div>
     <div className="route-legend"><span>● 赤：危険な設定</span><span>⊘ 青：実行拒否</span><span>✓ 緑：実行許可</span><span>○ 灰：未検証</span></div>
@@ -98,7 +97,7 @@ export function VerificationOutcome({ result }: { result: Result }) {
   const answers = result.replyChecks || [];
   const complete = result.decision === "LIMITED";
   const designOnly = result.decision === "DESIGN_ONLY" || result.decision === "NEEDS_INPUT";
-  return <section className={`outcome-board ${complete ? "complete" : designOnly ? "design" : "incomplete"}`} aria-label="検証結果の要約"><div className="outcome-heading"><span className="outcome-emblem" aria-hidden="true">{complete ? "✓" : designOnly ? "◇" : "!"}</span><div><p className="eyebrow">{complete ? "VERIFICATION COMPLETE" : designOnly ? "DESIGN REVIEW" : "HUMAN REQUIRED"}</p><h2>{complete ? "危険な操作を止め、必要な仕事を完了。" : designOnly ? "設計診断が完了しました。" : "検証を通過できず、起動を停止しました。"}</h2><p>{complete ? "合成環境での結果です。許可されるのは、範囲を限定した参照と下書き作成です。" : designOnly ? "実行の安全性は未検証です。下の改善案・確認事項をご覧ください。" : "不合格の検証内容と根拠を確認してください。"}</p></div></div><div className="outcome-proof">{[{ label: "危険操作・上限の拒否", count: negative.filter(c => c.passed).length, total: negative.length, caption: "送信・削除・範囲外アクセスなど" }, { label: "正常な操作の実行", count: positive.filter(c => c.passed).length, total: positive.length, caption: "顧客参照・資料参照・下書き" }, { label: "回答と根拠の一致", count: answers.filter(c => c.passed).length, total: answers.length, caption: "顧客・注文・返品条件と引用元" }].map(item => <div key={item.label}><p>{item.label}</p><strong>{item.total ? item.count : "—"}<small>{item.total ? ` / ${item.total}` : " 未検証"}</small></strong><span>{item.caption}</span></div>)}</div></section>;
+  return <section className={`outcome-board ${complete ? "complete" : designOnly ? "design" : "incomplete"}`} aria-label="検証結果の要約"><div className="outcome-heading"><span className="outcome-emblem" aria-hidden="true">{complete ? "✓" : designOnly ? "◇" : "!"}</span><div><p className="eyebrow">{complete ? "VERIFICATION COMPLETE" : designOnly ? "DESIGN REVIEW" : "HUMAN REQUIRED"}</p><h2>{complete ? "危険な操作を止め、必要な仕事を完了。" : designOnly ? "設計診断が完了しました。" : "検証を通過できず、起動を停止しました。"}</h2><p>{complete ? "審査時の合成環境で、範囲を限定した参照と下書き作成を検証しました。現在の起動可否は上部の判定をご確認ください。" : designOnly ? "実行の安全性は未検証です。下の改善案・確認事項をご覧ください。" : "不合格の検証内容と根拠を確認してください。"}</p></div></div><div className="outcome-proof">{[{ label: "危険操作・上限の拒否", count: negative.filter(c => c.passed).length, total: negative.length, caption: "送信・削除・範囲外アクセスなど" }, { label: "正常な操作の実行", count: positive.filter(c => c.passed).length, total: positive.length, caption: "顧客参照・資料参照・下書き" }, { label: "回答と根拠の一致", count: answers.filter(c => c.passed).length, total: answers.length, caption: "顧客・注文・返品条件と引用元" }].map(item => <div key={item.label}><p>{item.label}</p><strong>{item.total ? item.count : "—"}<small>{item.total ? ` / ${item.total}` : " 未検証"}</small></strong><span>{item.caption}</span></div>)}</div></section>;
 }
 
 export function PolicyComparison({ result }: { result: Result }) {

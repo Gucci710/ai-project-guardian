@@ -15,12 +15,12 @@ export default function LaunchPage() {
   const [input, setInput] = useState<string>(DEMOS.dangerous);
   const [busy, setBusy] = useState(false);
   const [motionEnabled, setMotionEnabled] = useState(true);
-  const [phase, setPhase] = useState("READY");
   const [message, setMessage] = useState("作りたいエージェントを説明してください。");
   const [result, setResult] = useState<Result | null>(null);
   const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null);
   const [audit, setAudit] = useState<Audit[]>([]);
   const [token, setToken] = useState("");
+  const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [visited, setVisited] = useState<string[]>([]);
   const [operationResult, setOperationResult] = useState<{ title: string; detail: string; output?: string; rule?: string; state: "pending" | "done" | "error" } | null>(null);
@@ -29,20 +29,33 @@ export default function LaunchPage() {
   const log = useRef<HTMLDivElement | null>(null);
   useEffect(() => () => abort.current?.abort(), []);
   useEffect(() => { if (log.current) log.current.scrollTop = log.current.scrollHeight; }, [audit]);
-  function edit(value: string) { setDiagnosis(null); setInput(value); setToken(""); setResult(null); setAudit([]); setPhase("READY"); setVisited([]); setError(""); setOperationResult(null); setMessage("入力変更後は再審査が必要です。"); }
+  useEffect(() => {
+    if (!token || expiresAt === null) return;
+    const expire = () => {
+      if (Date.now() < expiresAt) return;
+      const detail = "起動許可が失効しました。再審査してください。";
+      setToken(""); setError(detail); setMessage(detail);
+      setOperationResult({ title: "起動許可の有効期限が切れました", detail, state: "error" });
+    };
+    const timer = setTimeout(expire, Math.max(0, expiresAt - Date.now()));
+    window.addEventListener("focus", expire);
+    document.addEventListener("visibilitychange", expire);
+    return () => { clearTimeout(timer); window.removeEventListener("focus", expire); document.removeEventListener("visibilitychange", expire); };
+  }, [token, expiresAt]);
+  function edit(value: string) { setDiagnosis(null); setInput(value); setToken(""); setResult(null); setAudit([]); setVisited([]); setError(""); setOperationResult(null); setMessage("入力変更後は再審査が必要です。"); }
   async function review() {
     if (abort.current) return;
     const controller = new AbortController(); abort.current = controller;
     setDiagnosis(null);
-    setBusy(true); setResult(null); setAudit([]); setToken(""); setError(""); setOperationResult(null); setVisited([]); setPhase("DIAGNOSIS"); setMessage("Geminiに接続しています…");
+    setBusy(true); setResult(null); setAudit([]); setToken(""); setError(""); setOperationResult(null); setVisited([]); setMessage("Geminiに接続しています…");
     let completed = false;
     function receive(line: string) {
       if (!line.trim()) return;
       const event = JSON.parse(line) as Event;
       if (event.type === "diagnosis") setDiagnosis(event.diagnosis);
-      if (event.type === "phase") { setPhase(event.phase); setMessage(event.message); setVisited(v => [...new Set([...v, event.phase])]); }
+      if (event.type === "phase") { setMessage(event.message); setVisited(v => [...new Set([...v, event.phase])]); }
       if (event.type === "audit") setAudit(a => [...a, event.entry]);
-      if (event.type === "result") { setResult(event.result); setToken(event.token || ""); completed = true; }
+      if (event.type === "result") { setResult(event.result); setToken(event.token || ""); setExpiresAt(typeof event.expiresAt === "number" && Number.isFinite(event.expiresAt) ? event.expiresAt : null); completed = true; }
       if (event.type === "error") throw new Error(event.message);
     }
     try {
@@ -53,11 +66,11 @@ export default function LaunchPage() {
       try { for (;;) { const { value, done } = await reader.read(); if (done) break; pending += decoder.decode(value, { stream: true }); const lines = pending.split("\n"); pending = lines.pop() || ""; lines.forEach(receive); } receive(pending + decoder.decode()); }
       finally { reader.releaseLock(); }
       if (!completed) throw new Error("検証完了前に接続が切れました。");
-    } catch (caught) { const stopped = controller.signal.aborted; controller.abort(); setToken(""); setPhase("UNVERIFIED"); setError(stopped ? "実行を停止しました。未検証のため起動できません。" : caught instanceof Error ? caught.message : "検証に失敗しました。"); setMessage("未検証：起動許可は発行されていません。"); }
+    } catch (caught) { const stopped = controller.signal.aborted; controller.abort(); setToken(""); setError(stopped ? "実行を停止しました。未検証のため起動できません。" : caught instanceof Error ? caught.message : "検証に失敗しました。"); setMessage("未検証：起動許可は発行されていません。"); }
     finally { abort.current = null; setBusy(false); }
   }
   async function execute(operation: string) {
-    if (abort.current) return;
+    if (abort.current || !token) return;
     const controller = new AbortController(); abort.current = controller; setBusy(true); setError("");
     const action = operation === "draft" ? "下書き作成" : operation === "send" ? "送信" : "削除";
     setOperationResult({ title: `${action}を確認中…`, detail: "サーバーで権限を確認しています。", state: "pending" });
@@ -70,7 +83,7 @@ export default function LaunchPage() {
       setOperationResult({ title: data.allowed ? operation === "draft" ? "返信下書きを作成しました" : `${action}操作が許可されました` : `${action}は拒否されました`, detail: data.allowed ? "合成データでの操作結果です。実際のメール送信やファイル操作は行いません。" : reasons[last.rule] || "権限チェックで実行を停止しました。詳細は監査ログで確認できます。", output: last.output, rule: last.rule, state: "done" });
       setAudit(a => [...a, ...data.audit.map((e: Audit, i: number) => ({ ...e, sequence: a.length + i + 1 }))]);
       setMessage(data.allowed ? "許可された範囲で返信下書きを作成しました。" : "実行直前の権限チェックで操作を拒否しました。監査ログを確認できます。");
-    } catch (caught) { const detail = controller.signal.aborted ? "確認を中断しました。操作結果は確認できていません。" : caught instanceof Error ? caught.message : "操作に失敗しました。"; setError(detail); setOperationResult({ title: `${action}の確認を完了できませんでした`, detail, state: "error" }); }
+    } catch (caught) { const detail = controller.signal.aborted ? "確認を中断しました。操作結果は確認できていません。" : caught instanceof Error ? caught.message : "操作に失敗しました。"; setToken(""); setError(detail); setMessage("操作結果または現在の起動許可を確認できません。設計診断をやり直してください。"); setOperationResult({ title: `${action}の確認を完了できませんでした`, detail, state: "error" }); }
     finally { abort.current = null; setBusy(false); }
   }
   function saveFile(content: string, type: string, filename: string) {
@@ -85,8 +98,8 @@ export default function LaunchPage() {
   function downloadReport() {
     if (result) saveFile("\uFEFF" + buildReviewReport(result, audit), "text/plain;charset=utf-8", "agent-guardian-review.txt");
   }
-  const verdict = launchVerdict(result, busy, error);
-  return <main className={`guardian ${result?.decision === "BLOCKED" || phase === "UNVERIFIED" ? "danger" : result?.decision === "LIMITED" ? "verified" : "repair"}`}>
+  const verdict = launchVerdict(result, busy, error, Boolean(token));
+  return <main className={`guardian ${verdict.tone === "no-go" ? "danger" : verdict.tone === "go" ? "verified" : "repair"}`}>
     <div className="ambient-grid" /><div className="ambient-orb orb-one" />
     <div className="shell launch-shell" data-motion-enabled={motionEnabled}>
       <header className="header"><div className="brand"><span className="launch-logo">⬡</span><div>AGENT <strong>GUARDIAN</strong><small>起動許可プロトコル</small></div></div><div className="header-tools"><button className="tag motion-toggle" aria-label="画面のアニメーション" aria-pressed={motionEnabled} onClick={() => setMotionEnabled(value => !value)}><span aria-hidden="true">◌</span>演出 {motionEnabled ? "ON" : "OFF"}</button></div></header>
@@ -99,7 +112,7 @@ export default function LaunchPage() {
           {busy && <button className="button stop" onClick={() => abort.current?.abort()}>実行を停止</button>}
           <p className="field-help">設計診断はどの業務でも利用できます。実行検証は現在、問い合わせ返信の合成環境のみ対応しています。</p><p className="field-help">Geminiによる診断・修正・業務検証。AI呼び出し最大5回（再試行・モデル切替を含め最大20リクエスト）、全体9分。各隔離実行は最大10操作。実データや機密情報は入力しないでください。</p>
         </section>
-        <section className="panel launch-chamber" aria-live="polite"><div className="core-top"><div><p className="eyebrow">02 / PERMISSION CHAMBER</p><h2>起動審査室</h2></div><span className={`tag chamber-status ${busy ? "active" : ""}`}>{busy ? "審査中" : result ? "審査結果" : "入力待ち"}</span></div><PermissionChamber key={input} input={input} diagnosis={diagnosis} result={result} audit={audit} phase={phase} busy={busy} /><p className="launch-message">{message}</p><div className="launch-pipeline">{STAGES.map((s, i) => <span className={visited.includes(s) ? "done" : ""} key={s}><small>0{i + 1} / {s}</small><strong>{STAGE_LABELS[i]}</strong></span>)}</div></section>
+        <section className="panel launch-chamber" aria-live="polite"><div className="core-top"><div><p className="eyebrow">02 / PERMISSION CHAMBER</p><h2>起動審査室</h2></div><span className={`tag chamber-status ${busy ? "active" : ""}`}>{busy ? "審査中" : result ? "審査結果" : "入力待ち"}</span></div><PermissionChamber key={input} input={input} diagnosis={diagnosis} result={result} audit={audit} verdict={verdict} busy={busy} /><p className="launch-message">{message}</p><div className="launch-pipeline">{STAGES.map((s, i) => <span className={visited.includes(s) ? "done" : ""} key={s}><small>0{i + 1} / {s}</small><strong>{STAGE_LABELS[i]}</strong></span>)}</div></section>
       </div>
       {error && <p className="launch-error" role="alert">{error}</p>}
       {result && <VerificationOutcome result={result} />}

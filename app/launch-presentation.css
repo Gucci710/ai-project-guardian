@@ -40,7 +40,8 @@
 .launch-shell .verdict-banner.ready { padding-block: 18px; }
 .launch-shell .verdict-banner.ready h2 { font-size: 24px; }
 .launch-shell .launch-chamber { position: relative; background: radial-gradient(ellipse at 52% 38%, #22769830, transparent 60%), linear-gradient(150deg, #14263b, #091422 70%); border-color: #67c6e769; }
-.launch-shell .core-top { padding: 20px 24px; border-bottom: 1px solid #67b4d338; background: #16314a66; margin-bottom: 22px; flex-wrap: wrap; }
+.launch-shell .core-top { display: flex; justify-content: space-between; gap: 12px; align-items: center; position: relative; z-index: 1; padding: 20px 24px; border-bottom: 1px solid #67b4d338; background: #16314a66; margin-bottom: 22px; flex-wrap: wrap; }
+.launch-shell .core-top .eyebrow { color: var(--accent); margin: 0; }
 .launch-shell .chamber-status { display: inline-flex; align-items: center; gap: 8px; background: #061521; }
 .launch-shell .chamber-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #a7bed0; }
 .launch-shell .chamber-status.active::before { background: #80eaff; box-shadow: 0 0 12px #80eaff; }
@@ -75,6 +76,8 @@
 .launch-shell .route-node.draft .node-icon { display: inline; }
 .launch-shell .route-node.draft .check-preview { -webkit-line-clamp: 2; }
 .launch-shell .decision-core { color: var(--verdict); }
+.launch-shell .theater-core.pending { color: #ffd275; }
+.launch-shell .theater-core.no-go { color: #ff7994; }
 .launch-shell .theater-core > strong { font-size: 21px; line-height: 1.6; }
 .launch-shell .theater-core > small { font-size: 13px; line-height: 1.8; color: var(--muted-copy); }
 .launch-shell .decision-orbit { position: relative; width: min(156px, calc(100% - 24px)); margin-bottom: 26px; background: radial-gradient(circle, #203c51, #091a2a 70%); border: 1px solid var(--verdict); outline: 0; box-shadow: 0 0 50px color-mix(in srgb, var(--verdict) 20%, transparent), inset 0 0 24px #73d2f21a; }

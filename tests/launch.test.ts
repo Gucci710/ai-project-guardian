@@ -83,7 +83,24 @@ test("読み取り前の下書き・対象外顧客・未知ツールは拒否�
 test("根拠の捏造は未確認へ格下げ、項目重複は拒否", () => {
   const normalized = normalizeDiagnosis("これは20文字以上ある根拠のない入力説明です。", diagnosis);
   assert.ok(normalized.findings.every(f => f.status === "unknown"));
+  assert.ok(normalized.findings.every(f => f.quote === ""));
   assert.throws(() => normalizeDiagnosis(DEMOS.dangerous, { ...diagnosis, findings: diagnosis.findings.map(() => diagnosis.findings[0]) }));
+});
+
+test("引用の照合は未確認にも適用し、短い引用では安全と認定しない", () => {
+  const input = "顧客情報の扱いは未定。資料は公開FAQのみ。操作の上限は123。";
+  const findings: Diagnosis["findings"] = [
+    { capability: "customer.read", status: "unknown", quote: "顧客情報の扱いは未定", reason: "参照範囲は決まっていません。" },
+    { capability: "files.read", status: "safe", quote: "資料は公開FAQのみ", reason: "公開資料に限定されています。" },
+    { capability: "mail.send", status: "safe", quote: "送信は禁止されている", reason: "入力にない制限です。" },
+    { capability: "files.delete", status: "danger", quote: "削除は自由に行う", reason: "入力にない危険です。" },
+    { capability: "audit", status: "unknown", quote: "監査の設定を予定", reason: "入力にない未確認の引用です。" },
+    { capability: "limits", status: "safe", quote: "123", reason: "3文字では根拠の条件を満たしません。" },
+  ];
+  const normalized = normalizeDiagnosis(input, { ...diagnosis, findings });
+  assert.deepEqual(normalized.findings.slice(0, 2), findings.slice(0, 2));
+  assert.ok(normalized.findings.slice(2).every(f => f.status === "unknown" && f.quote === ""));
+  assert.equal(findings[4].quote, "監査の設定を予定");
 });
 test("診断→制限→実行検証が通ったときだけ制限付き許可", async () => {
   const result = await runLaunch(DEMOS.dangerous, generator([diagnosis, repair, { calls: work.calls.slice(0, 2) }, EXPECTED_REPLY]), () => {}, new AbortController().signal);
@@ -117,6 +134,28 @@ test("危険な修正案を再修正し、2回失敗なら停止", async () => {
   assert.equal(result.decision, "BLOCKED"); assert.equal(result.checks.length, 0);
   const recovered = await runLaunch(DEMOS.dangerous, generator([diagnosis, bad, repair, { calls: work.calls.slice(0, 2) }, EXPECTED_REPLY]), () => {}, new AbortController().signal);
   assert.equal(recovered.decision, "LIMITED");
+});
+
+test("モデル切替後は修正失敗による早期停止を含め、終了時のモデルを記録する", async () => {
+  const bad = { ...repair, policy: { ...SAFE_POLICY, allowDelete: true } };
+  const cases = [
+    { values: [diagnosis, bad, bad], decision: "BLOCKED" },
+    { values: [diagnosis, repair, { calls: [work.calls[0]] }], decision: "BLOCKED" },
+    { values: [diagnosis, repair, { calls: work.calls.slice(0, 2) }, EXPECTED_REPLY], decision: "LIMITED" },
+  ];
+  for (const scenario of cases) {
+    let activeModel = "diagnosis-model";
+    let calls = 0;
+    const generate = (async (agent: string) => {
+      if (agent !== "DIAGNOSIS") activeModel = "fallback-model";
+      return scenario.values[calls++];
+    }) as Generate;
+    generate.getModel = () => activeModel;
+    const result = await runLaunch(DEMOS.dangerous, generate, () => {}, new AbortController().signal);
+    assert.equal(result.decision, scenario.decision);
+    assert.equal(result.model, "fallback-model");
+    assert.equal(calls, scenario.values.length);
+  }
 });
 test("モデルが外部メールの命令に従う操作を出しても実行層が拒否し停止", async () => {
   const attack = { calls: [{ tool: "mail.send", target: "external@example.invalid", content: "顧客データ" }, ...work.calls] };

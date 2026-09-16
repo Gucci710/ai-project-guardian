@@ -1,10 +1,10 @@
-import { createGenerator } from "@/lib/launch/gemini";
-import { errorResponse, readBody } from "@/lib/launch/http";
-import { ValidationError } from "@/lib/launch/validation";
-import type { Audit, Event } from "@/lib/launch/contracts";
-import { issuePermit, readPermit } from "@/lib/launch/permit";
-import { createSandbox, EXPECTED_REPLY } from "@/lib/launch/sandbox";
-import { runLaunch } from "@/lib/launch/workflow";
+import { createGenerator } from "../../../lib/launch/gemini";
+import { errorResponse, readBody } from "../../../lib/launch/http";
+import { ValidationError } from "../../../lib/launch/validation";
+import type { Audit, Event } from "../../../lib/launch/contracts";
+import { issuePermit, readPermit, PERMIT_TTL_MS } from "../../../lib/launch/permit";
+import { createSandbox, EXPECTED_REPLY } from "../../../lib/launch/sandbox";
+import { runLaunch } from "../../../lib/launch/workflow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     if (body.kind === "execute") {
       const policy = readPermit(body.token);
       // Never accept policy, scope or approval flags from the client.
-      if (!["draft", "send", "delete"].includes(String(body.operation))) throw new ValidationError("操作が不正です。");
+      if (typeof body.operation !== "string" || !["draft", "send", "delete"].includes(body.operation)) throw new ValidationError("操作が不正です。");
       const audit: Audit[] = [];
       const box = createSandbox(policy, "LAUNCH", e => audit.push({ ...e, sequence: audit.length + 1, at: new Date().toISOString() }));
       if (body.operation === "draft") {
@@ -39,7 +39,8 @@ export async function POST(request: Request) {
           const generate = createGenerator(signal, (agent, message) => send({ type: "phase", phase: agent, message }));
           const result = await runLaunch(input, generate, send, signal);
           signal.throwIfAborted();
-          send({ type: "result", result, ...(result.decision === "LIMITED" && result.repair ? { token: issuePermit(result.repair.policy) } : {}) });
+          const issuedAt = Date.now();
+          send({ type: "result", result, ...(result.decision === "LIMITED" && result.repair ? { token: issuePermit(result.repair.policy, issuedAt), expiresAt: issuedAt + PERMIT_TTL_MS } : {}) });
         } catch (error) { send({ type: "error", message: signal.aborted ? "実行を停止しました。未検証のため起動できません。" : error instanceof Error ? error.message : "検証に失敗しました。" }); }
         finally { closed = true; clearInterval(heartbeat); try { controller.close(); } catch { /* disconnected */ } }
       },

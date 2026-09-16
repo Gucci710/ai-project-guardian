@@ -90,6 +90,95 @@ test("操作中と許可失効の結果をボタンの近くに表示する", as
   await expect(feedback).toContainText("起動許可が失効しました。再審査してください。");
   await expect(feedback).not.toContainText("送信は拒否されました");
   await expect(page.getByRole("button", { name: "送信の拒否を確認" })).toBeDisabled();
+  await expect(page.locator(".verdict-stamp")).toHaveText("PEND");
+  await expect(page.locator(".decision-orbit strong")).toHaveText("PEND");
+  await page.getByRole("button", { name: "隔離環境の実行経路", exact: true }).click();
+  await expect(page.locator(".theater-core .core-caption strong")).toHaveText("PEND");
+  await expect(page.locator(".theater-core.verified")).toHaveCount(0);
+  await page.getByRole("button", { name: /設計診断を開始/ }).click();
+  await expect(page.locator(".verdict-stamp")).toHaveText("GO");
+  await expect(page.locator(".theater-core .core-caption strong")).toHaveText("VERIFIED");
+  await expect(page.getByRole("button", { name: "送信の拒否を確認" })).toBeEnabled();
+});
+
+for (const failure of ["network", "invalid-response", "cancel"] as const) {
+  test(`操作確認の失敗（${failure}）では全判定を保留し、再操作を止める`, async ({ page }) => {
+    await page.route("**/api/launch", async route => {
+      if (route.request().postDataJSON().kind === "review") {
+        await route.fulfill({ contentType: "application/x-ndjson", body: JSON.stringify({ type: "result", result, token: "test-token" }) + "\n" });
+      } else if (failure === "network") {
+        await route.abort("failed");
+      } else {
+        await route.fulfill({ json: { allowed: true, audit: [] } });
+      }
+    });
+    await page.goto("/");
+    if (failure === "cancel") {
+      await page.evaluate(() => {
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = (resource, options) => {
+          if (JSON.parse(String(options?.body ?? "{}")).kind !== "execute") return originalFetch(resource, options);
+          return new Promise<Response>((_, reject) => {
+            const signal = options!.signal!;
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          });
+        };
+      });
+    }
+    await page.getByRole("button", { name: /設計診断を開始/ }).click();
+    await expect(page.locator(".verdict-stamp")).toHaveText("GO");
+    await page.getByRole("button", { name: "送信の拒否を確認" }).click();
+    if (failure === "cancel") {
+      await expect(page.locator(".verdict-stamp")).toHaveText("CHECKING");
+      await page.getByRole("button", { name: "実行を停止", exact: true }).click();
+    }
+    await expect(page.getByRole("status", { name: "操作確認の結果" })).toContainText("確認を完了できませんでした");
+    await expect(page.locator(".verdict-stamp")).toHaveText("PEND");
+    await expect(page.locator(".decision-orbit strong")).toHaveText("PEND");
+    for (const name of ["制限付き起動：下書きを作成", "送信の拒否を確認", "削除の拒否を確認"]) {
+      await expect(page.getByRole("button", { name, exact: true })).toBeDisabled();
+    }
+    await page.getByRole("button", { name: "隔離環境の実行経路", exact: true }).click();
+    await expect(page.locator(".theater-core .core-caption strong")).toHaveText("PEND");
+    await expect(page.locator(".theater-core.verified")).toHaveCount(0);
+  });
+}
+
+test("許可期限の到来だけで起動を保留し、再審査の新しい期限に更新する", async ({ page }) => {
+  let expiresAt = Date.now() + 600000;
+  await page.clock.install({ time: expiresAt - 600000 });
+  await page.route("**/api/launch", route => {
+    expect(route.request().postDataJSON().kind).toBe("review");
+    return route.fulfill({ contentType: "application/x-ndjson", body: JSON.stringify({ type: "result", result, token: "test-token", expiresAt }) + "\n" });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: /設計診断を開始/ }).click();
+  await expect(page.locator(".verdict-stamp")).toHaveText("GO");
+  await page.clock.fastForward(600001);
+  await expect(page.locator(".verdict-stamp")).toHaveText("PEND");
+  await expect(page.locator(".decision-orbit strong")).toHaveText("PEND");
+  await expect(page.getByRole("button", { name: "制限付き起動：下書きを作成" })).toBeDisabled();
+  await expect(page.getByRole("status", { name: "操作確認の結果" })).toContainText("起動許可が失効しました");
+  await page.getByRole("button", { name: "隔離環境の実行経路", exact: true }).click();
+  await expect(page.locator(".theater-core .core-caption strong")).toHaveText("PEND");
+  expiresAt = await page.evaluate(() => Date.now() + 600000);
+  await page.getByRole("button", { name: /設計診断を開始/ }).click();
+  await expect(page.locator(".verdict-stamp")).toHaveText("GO");
+  await expect(page.locator(".theater-core .core-caption strong")).toHaveText("VERIFIED");
+  await page.clock.fastForward(300000);
+  await expect(page.locator(".verdict-stamp")).toHaveText("GO");
+  await expect(page.getByRole("button", { name: "制限付き起動：下書きを作成" })).toBeEnabled();
+});
+
+test("検証に合格しても許可証を受信していなければ起動保留にする", async ({ page }) => {
+  await page.route("**/api/launch", route => route.fulfill({ contentType: "application/x-ndjson", body: JSON.stringify({ type: "result", result }) + "\n" }));
+  await page.goto("/");
+  await page.getByRole("button", { name: /設計診断を開始/ }).click();
+  await expect(page.locator(".verdict-stamp")).toHaveText("PEND");
+  await expect(page.locator(".decision-orbit strong")).toHaveText("PEND");
+  await expect(page.getByRole("button", { name: "制限付き起動：下書きを作成" })).toHaveCount(0);
+  await page.getByRole("button", { name: "隔離環境の実行経路", exact: true }).click();
+  await expect(page.locator(".theater-core .core-caption strong")).toHaveText("PEND");
 });
 
 test("回答の誤りを表示し、下書きと起動操作を出さない", async ({ page }) => {

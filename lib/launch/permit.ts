@@ -3,15 +3,17 @@ import { ValidationError, validate } from "./validation";
 import { policySchema, type Policy } from "./contracts";
 import { policyProblems } from "./sandbox";
 
+export const PERMIT_TTL_MS = 600000;
+
 function mac(payload: string) {
   const key = process.env.GUARDIAN_SIGNING_KEY || process.env.GEMINI_API_KEY;
   if (!key) throw new Error("署名用のサーバー設定がありません。");
   return createHmac("sha256", key).update(`launch-permit-v1:${payload}`).digest();
 }
-export function issuePermit(policy: Policy): string {
+export function issuePermit(policy: Policy, issuedAt = Date.now()): string {
   validate(policy, policySchema);
   if (policyProblems(policy).length) throw new ValidationError("危険な権限には起動許可を発行できません。");
-  const payload = Buffer.from(JSON.stringify({ version: 1, expires: Date.now() + 600000, policy })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ version: 1, expires: issuedAt + PERMIT_TTL_MS, policy })).toString("base64url");
   return `${payload}.${mac(payload).toString("base64url")}`;
 }
 export function readPermit(token: unknown): Policy {

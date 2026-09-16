@@ -51,18 +51,23 @@ export function createGenerator(signal: AbortSignal, onRetry: (agent: string, me
             httpOptions: { timeout: 90000, retryOptions: { attempts: 1 } },
           },
         });
+        signal.throwIfAborted();
         if (!response.text) throw new ValidationError(`${agent}が結果を返しませんでした。`);
         let parsed: unknown;
         try { parsed = JSON.parse(response.text); } catch { throw new ValidationError(`${agent}のJSONを読み取れませんでした。`); }
         return validate<T>(parsed, schema, agent);
       } catch (error) {
         if (signal.aborted) throw error;
-        const status = Number((error as { status?: number }).status);
-        const transient = [408, 429, 500, 502, 503, 504].includes(status);
-        const retryableOnSameModel = [408, 500, 502, 503, 504].includes(status);
+        // The SDK's per-request timeout aborts its own signal without an HTTP status.
+        // User cancellation and the overall review deadline have already stopped above.
+        const attemptTimedOut = error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name);
+        const status = Number((error as { status?: number } | null)?.status);
+        const transient = attemptTimedOut || [408, 429, 500, 502, 503, 504].includes(status);
+        const retryableOnSameModel = attemptTimedOut || [408, 500, 502, 503, 504].includes(status);
         if (attempt === 0 && retryableOnSameModel) {
           const ms = 2000 + Math.floor(Math.random() * 250);
-          onRetry(agent, `${activeModel}: APIエラー (${status})。${Math.round(ms / 1000)}秒待って1回再試行します。`);
+          const failure = attemptTimedOut ? "応答がタイムアウトしました" : `APIエラー (${status})`;
+          onRetry(agent, `${activeModel}: ${failure}。${Math.round(ms / 1000)}秒待って1回再試行します。`);
           await pause(ms, signal);
           continue;
         }

@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildReviewReport } from "../lib/launch/report";
-import { CAPABILITIES, type Audit, type Result } from "../lib/launch/contracts";
+import { CAPABILITIES, type Audit, type Event, type Result } from "../lib/launch/contracts";
+import { runLaunch } from "../lib/launch/workflow";
+import type { Generate } from "../lib/launch/gemini";
 
 function fixture(decision: Result["decision"] = "DESIGN_ONLY"): Result {
   return {
@@ -27,6 +29,26 @@ test("PENDレポートは未検証・確認事項・提案を区別し、存在�
   assert.match(report, /未実施。操作を止められるか/);
   assert.match(report, /安全度やAIの正答率ではありません/);
   assert.doesNotMatch(report, /記録開始：|記録最終：/);
+});
+
+test("モデルが返した架空の引用は画面向けイベントと共有レポートに残さない", async () => {
+  const source = fixture();
+  source.diagnosis.findings[0] = { capability: "customer.read", status: "safe", quote: "顧客へのアクセスは禁止", reason: "参照範囲の指定を確認できません。" };
+  source.diagnosis.findings[1] = { capability: "files.read", status: "unknown", quote: "非公開資料も参照したい", reason: "資料の範囲を確認してください。" };
+  source.diagnosis.findings[2] = { capability: "mail.send", status: "unknown", quote: "比較レポートを画面に表示したい", reason: "画面への表示は指定されていますが、外部送信の扱いは未定です。" };
+  const events: Event[] = [];
+  const generate = (async () => source.diagnosis) as Generate;
+  const result = await runLaunch(source.input, generate, event => events.push(event), new AbortController().signal);
+  const streamed = events.find(event => event.type === "diagnosis");
+  assert.equal(streamed?.type, "diagnosis");
+  if (streamed?.type !== "diagnosis") throw new Error("診断イベントがありません。");
+  assert.equal(streamed.diagnosis.findings[0].status, "unknown");
+  assert.equal(streamed.diagnosis.findings[0].quote, "");
+  assert.equal(streamed.diagnosis.findings[1].quote, "");
+  const report = buildReviewReport(result, result.audit);
+  assert.doesNotMatch(report, /顧客へのアクセスは禁止|非公開資料も参照したい/);
+  assert.match(report, /入力の引用：なし（原文で裏付けられていません）/);
+  assert.match(report, /入力の引用：比較レポートを画面に表示したい/);
 });
 
 test("GOレポートも元の危険を修正前と明示し、拒否成功と回答の照合を実値で出す", () => {
