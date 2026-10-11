@@ -23,7 +23,7 @@ Google Cloud Console右上のCloud Shellを開きます。ローカルPCへのgc
 export GUARDIAN_PROJECT="YOUR_PROJECT_ID"
 export GUARDIAN_REGION="asia-northeast1"
 gcloud config set project "$GUARDIAN_PROJECT"
-gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com firestore.googleapis.com
 ```
 
 ソースをCloud Shellへ配置します。Gitリポジトリにコミット済みならそのリポジトリをcloneしてください。未コミットの変更はcloneに含まれないため、今回の実装を含むことを確認します。アップロードする場合はソースとpackage-lock.json・Dockerfile・設定ファイルを含め、`.env.local`・`node_modules`・`.next`は含めません。
@@ -51,6 +51,45 @@ gcloud secrets add-iam-policy-binding guardian-gemini-api-key \
   --role="roles/secretmanager.secretAccessor"
 ```
 
+## Firestoreで診断回数を保持
+
+Cloud Runの再起動や複数インスタンスでも診断回数を失わないよう、`review` APIのカウンターだけをFirestoreに保存します。個人情報や診断本文は保存せず、HMAC化した送信元識別子と回数・期限だけを保存します。
+
+まず、Firestoreのデータベース一覧を確認します。
+
+```bash
+gcloud firestore databases list --project "$GUARDIAN_PROJECT"
+```
+
+`(default)` がなければ、Cloud Runと同じ東京リージョンにNative modeで1回だけ作成します。
+
+```bash
+gcloud firestore databases create \
+  --database="(default)" \
+  --location="$GUARDIAN_REGION" \
+  --type=firestore-native \
+  --delete-protection \
+  --project "$GUARDIAN_PROJECT"
+```
+
+実行サービスアカウントには、Firestoreの読み書きに必要なロールだけを追加します。
+
+```bash
+gcloud projects add-iam-policy-binding "$GUARDIAN_PROJECT" \
+  --member="serviceAccount:${GUARDIAN_RUNTIME}" \
+  --role="roles/datastore.user"
+```
+
+期限切れカウンターを自動削除するTTLも有効にします。制限判定自体はTTLに依存しないため、有効化の反映待ち中も安全側で動作します。
+
+```bash
+gcloud firestore fields ttls update expiresAt \
+  --collection-group=guardian_review_limits_v1 \
+  --enable-ttl \
+  --database="(default)" \
+  --project "$GUARDIAN_PROJECT"
+```
+
 キーはビルドに渡さず、Cloud Run起動時に環境変数として読み込みます。[Secret Manager連携の公式手順](https://docs.cloud.google.com/run/docs/configuring/services/secrets)に沿った設定です。
 
 ソースビルドに使う既定アカウントへBuilder権限を付与します。
@@ -73,20 +112,33 @@ gcloud run deploy ai-project-guardian \
   --region "$GUARDIAN_REGION" \
   --service-account "$GUARDIAN_RUNTIME" \
   --set-secrets "GEMINI_API_KEY=guardian-gemini-api-key:1" \
-  --set-env-vars "GEMINI_MODEL=gemini-3.8-flash" \
+  --set-env-vars "GEMINI_MODEL=gemini-3.8-flash,GUARDIAN_RATE_LIMIT_BACKEND=firestore,GUARDIAN_REVIEW_WINDOW_SECONDS=600,GUARDIAN_REVIEW_WINDOW_LIMIT=2,GUARDIAN_REVIEW_DAILY_LIMIT=3" \
   --port 8080 \
   --memory 512Mi \
   --cpu 1 \
   --concurrency 8 \
   --min-instances 0 \
-  --max-instances 2 \
+  --max-instances 1 \
   --timeout 1800 \
   --no-allow-unauthenticated
 ```
 
+この設定では、同じ送信元からの診断は10分間に2回、サービス全体では24時間の固定枠に3回までです。超過時は`429`と`Retry-After`を返します。Firestoreを確認できない場合は診断を`503`で安全側に停止し、Geminiを呼びません。下書き作成・送信拒否・削除拒否はGeminiを呼ばないため、この回数制限の対象外です。
+
 モデルは利用するAPIキーで利用可能なIDを指定してください。ビルド中にGeminiキーは不要です。`.gcloudignore`と`.dockerignore`で環境ファイルを送信対象・イメージから除外します。
 
 初回はIAM認証を必須にしています。API使用量が発生するため、このアプリは認証・利用制限なしの一般公開を初期設定にしていません。
+
+## 確認後に一般公開
+
+診断と回数制限の本番確認後、審査員がログインなしで開けるようにCloud RunのInvoker IAMチェックを無効化します。これはコードのデプロイと本番確認が終わってから実行します。
+
+```bash
+gcloud run services update ai-project-guardian \
+  --project "$GUARDIAN_PROJECT" \
+  --region "$GUARDIAN_REGION" \
+  --no-invoker-iam-check
+```
 
 ## ブラウザーで確認
 

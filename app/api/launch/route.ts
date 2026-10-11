@@ -3,6 +3,7 @@ import { errorResponse, readBody } from "../../../lib/launch/http";
 import { ValidationError } from "../../../lib/launch/validation";
 import type { Audit, Event } from "../../../lib/launch/contracts";
 import { issuePermit, readPermit, PERMIT_TTL_MS } from "../../../lib/launch/permit";
+import { consumeReviewLimit, reviewLimitResponse } from "../../../lib/launch/rate-limit";
 import { createSandbox, EXPECTED_REPLY } from "../../../lib/launch/sandbox";
 import { runLaunch } from "../../../lib/launch/workflow";
 
@@ -26,6 +27,8 @@ export async function POST(request: Request) {
       return Response.json({ audit, replyChecks: box.replyChecks, allowed: audit.at(-1)?.allowed }, { headers: { "Cache-Control": "no-store" } });
     }
     if (body.kind !== "review" || typeof body.input !== "string" || body.input.trim().length < 5 || body.input.length > 12000) throw new ValidationError("エージェントの説明を5〜12000文字で入力してください。");
+    const limit = await consumeReviewLimit(request);
+    if (limit.allowed === false) return reviewLimitResponse(limit);
     const input = body.input.trim();
     const cancel = new AbortController();
     const signal = AbortSignal.any([request.signal, cancel.signal, AbortSignal.timeout(540000)]);
