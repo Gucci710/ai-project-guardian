@@ -21,7 +21,7 @@ npm run dev
 
 [http://127.0.0.1:3000](http://127.0.0.1:3000)を開きます。
 
-`GEMINI_MODEL`の既定値は`gemini-3.7-flash`です。API利用制限や一時障害では、`GEMINI_FALLBACK_MODELS`に指定したモデルへ有限回だけ切り替えます。
+`GEMINI_MODEL`の既定値は`gemini-3.8-flash`です。API利用制限や一時障害では、`GEMINI_FALLBACK_MODELS`に指定したモデルへ有限回だけ切り替えます。
 
 ## 起動審査
 

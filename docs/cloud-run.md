@@ -73,7 +73,7 @@ gcloud run deploy ai-project-guardian \
   --region "$GUARDIAN_REGION" \
   --service-account "$GUARDIAN_RUNTIME" \
   --set-secrets "GEMINI_API_KEY=guardian-gemini-api-key:1" \
-  --set-env-vars "GEMINI_MODEL=gemini-3.7-flash" \
+  --set-env-vars "GEMINI_MODEL=gemini-3.8-flash" \
   --port 8080 \
   --memory 512Mi \
   --cpu 1 \

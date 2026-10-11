@@ -2,7 +2,7 @@ import { GoogleGenAI, type GenerateContentParameters } from "@google/genai";
 import { setTimeout as delay } from "node:timers/promises";
 import { type Schema, ValidationError, validate } from "./validation";
 
-export const modelName = () => process.env.GEMINI_MODEL || "gemini-3.7-flash";
+export const modelName = () => process.env.GEMINI_MODEL || "gemini-3.8-flash";
 export type Generate = (<T>(agent: string, instructions: string, context: unknown, schema: Schema) => Promise<T>) & { getModel?: () => string };
 
 // Gemini model versions accept different validation keywords. Keep the API schema structural;
@@ -29,7 +29,7 @@ export function createGenerator(signal: AbortSignal, onRetry: (agent: string, me
   const request = io.request ?? ((parameters: GenerateContentParameters) => ai.models.generateContent(parameters));
   const pause = io.pause ?? ((ms: number, abort: AbortSignal) => delay(ms, undefined, { signal: abort }));
   let activeModel = initialModel;
-  const configuredFallbacks = process.env.GEMINI_FALLBACK_MODELS ?? process.env.GEMINI_FALLBACK_MODEL ?? "gemini-3.5-flash-lite,gemini-3.1-flash-lite";
+  const configuredFallbacks = process.env.GEMINI_FALLBACK_MODELS ?? process.env.GEMINI_FALLBACK_MODEL ?? "gemini-3.6-flash,gemini-3.5-flash-lite";
   const models = [...new Set([initialModel, ...configuredFallbacks.split(",").map(model => model.trim())].filter(Boolean))];
   const generate: Generate = async <T>(agent: string, instructions: string, context: unknown, schema: Schema): Promise<T> => {
     const candidates = models.slice(Math.max(0, models.indexOf(activeModel)));
@@ -47,7 +47,7 @@ export function createGenerator(signal: AbortSignal, onRetry: (agent: string, me
           config: {
             systemInstruction: instructions,
             responseMimeType: "application/json", responseJsonSchema: modelSchema(schema),
-            temperature: 0.2, maxOutputTokens: 14000, abortSignal: signal,
+            maxOutputTokens: 14000, abortSignal: signal,
             httpOptions: { timeout: 90000, retryOptions: { attempts: 1 } },
           },
         });

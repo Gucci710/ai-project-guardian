@@ -32,16 +32,23 @@ function harness(
   respond: (parameters: GenerateContentParameters, requestNumber: number) => Promise<{ text?: string }>,
   signal = new AbortController().signal,
 ) {
-  const models: string[] = [], notifications: string[] = [], pauses: number[] = [];
+  const models: string[] = [], notifications: string[] = [], pauses: number[] = [], requests: GenerateContentParameters[] = [];
   const generate = createGenerator(signal, (_agent, message) => notifications.push(message), "primary", {
     request: async parameters => {
+      requests.push(parameters);
       models.push(parameters.model);
       return respond(parameters, models.length);
     },
     pause: async ms => { pauses.push(ms); },
   });
-  return { generate, models, notifications, pauses };
+  return { generate, models, notifications, pauses, requests };
 }
+
+test("Gemini 3.8で廃止されたtemperatureを送信しない", async () => withSyntheticConfiguration(async () => {
+  const observed = harness(async () => success);
+  await ask(observed.generate);
+  assert.equal("temperature" in (observed.requests[0].config ?? {}), false);
+}));
 
 test("SDK単発タイムアウトから同じモデルの再試行で復帰する", async () => withSyntheticConfiguration(async () => {
   const observed = harness(async (_parameters, count) => {
