@@ -11,6 +11,8 @@ import { DEMOS, type Audit, type Diagnosis, type Event, type Result } from "@/li
 const STAGES = ["DIAGNOSIS", "RED TEAM", "SELF REPAIR", "RETEST", "WORK TEST", "VERIFIED"];
 const STAGE_LABELS = ["設計を診断", "危険を再現", "権限を修正", "制限を検証", "業務を確認", "起動を判定"];
 const NAMES: Record<string, string> = { "customer.read": "顧客データ", "files.read": "資料の参照", "mail.send": "外部送信", "files.delete": "ファイル削除", audit: "監査記録", limits: "実行上限" };
+type Operation = "draft" | "send" | "delete";
+type OperationResult = { title: string; detail: string; output?: string; rule?: string; state: "pending" | "done" | "error"; allowed?: boolean };
 export default function LaunchPage() {
   const [input, setInput] = useState<string>(DEMOS.dangerous);
   const [busy, setBusy] = useState(false);
@@ -23,7 +25,8 @@ export default function LaunchPage() {
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [visited, setVisited] = useState<string[]>([]);
-  const [operationResult, setOperationResult] = useState<{ title: string; detail: string; output?: string; rule?: string; state: "pending" | "done" | "error" } | null>(null);
+  const [operationResult, setOperationResult] = useState<OperationResult | null>(null);
+  const [activeOperation, setActiveOperation] = useState<Operation | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const abort = useRef<AbortController | null>(null);
   const log = useRef<HTMLDivElement | null>(null);
@@ -34,7 +37,7 @@ export default function LaunchPage() {
     const expire = () => {
       if (Date.now() < expiresAt) return;
       const detail = "起動許可が失効しました。再審査してください。";
-      setToken(""); setError(detail); setMessage(detail);
+      setToken(""); setError(detail); setMessage(detail); setActiveOperation(null);
       setOperationResult({ title: "起動許可の有効期限が切れました", detail, state: "error" });
     };
     const timer = setTimeout(expire, Math.max(0, expiresAt - Date.now()));
@@ -42,12 +45,12 @@ export default function LaunchPage() {
     document.addEventListener("visibilitychange", expire);
     return () => { clearTimeout(timer); window.removeEventListener("focus", expire); document.removeEventListener("visibilitychange", expire); };
   }, [token, expiresAt]);
-  function edit(value: string) { setDiagnosis(null); setInput(value); setToken(""); setResult(null); setAudit([]); setVisited([]); setError(""); setOperationResult(null); setMessage("入力変更後は再審査が必要です。"); }
+  function edit(value: string) { setDiagnosis(null); setInput(value); setToken(""); setResult(null); setAudit([]); setVisited([]); setError(""); setOperationResult(null); setActiveOperation(null); setMessage("入力変更後は再審査が必要です。"); }
   async function review() {
     if (abort.current) return;
     const controller = new AbortController(); abort.current = controller;
     setDiagnosis(null);
-    setBusy(true); setResult(null); setAudit([]); setToken(""); setError(""); setOperationResult(null); setVisited([]); setMessage("Geminiに接続しています…");
+    setBusy(true); setResult(null); setAudit([]); setToken(""); setError(""); setOperationResult(null); setActiveOperation(null); setVisited([]); setMessage("Geminiに接続しています…");
     let completed = false;
     function receive(line: string) {
       if (!line.trim()) return;
@@ -69,10 +72,11 @@ export default function LaunchPage() {
     } catch (caught) { const stopped = controller.signal.aborted; controller.abort(); setToken(""); setError(stopped ? "実行を停止しました。未検証のため起動できません。" : caught instanceof Error ? caught.message : "検証に失敗しました。"); setMessage("未検証：起動許可は発行されていません。"); }
     finally { abort.current = null; setBusy(false); }
   }
-  async function execute(operation: string) {
+  async function execute(operation: Operation) {
     if (abort.current || !token) return;
     const controller = new AbortController(); abort.current = controller; setBusy(true); setError("");
     const action = operation === "draft" ? "下書き作成" : operation === "send" ? "送信" : "削除";
+    setActiveOperation(operation);
     setOperationResult({ title: `${action}を確認中…`, detail: "サーバーで権限を確認しています。", state: "pending" });
     try {
       const response = await fetch("/api/launch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "execute", token, operation }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
@@ -80,7 +84,7 @@ export default function LaunchPage() {
       const last: Audit | undefined = data.audit?.at(-1);
       if (!last || typeof data.allowed !== "boolean") throw new Error("操作結果を確認できませんでした。もう一度お試しください。");
       const reasons: Record<string, string> = { SEND_DISABLED_APPROVAL_REQUIRED: "この起動許可ではメール送信を許可していません。外部への送信は行われていません。", DELETE_DISABLED: "この起動許可ではファイル削除を許可していません。ファイルは削除されていません。", CALL_LIMIT: "操作回数の上限に達したため、実行を停止しました。", DRAFT_FACTS_REJECTED: "回答内容と根拠が一致しないため、下書きを作成しませんでした。" };
-      setOperationResult({ title: data.allowed ? operation === "draft" ? "返信下書きを作成しました" : `${action}操作が許可されました` : `${action}は拒否されました`, detail: data.allowed ? "合成データでの操作結果です。実際のメール送信やファイル操作は行いません。" : reasons[last.rule] || "権限チェックで実行を停止しました。詳細は監査ログで確認できます。", output: last.output, rule: last.rule, state: "done" });
+      setOperationResult({ title: data.allowed ? operation === "draft" ? "返信下書きを作成しました" : `${action}操作が許可されました` : `${action}は拒否されました`, detail: data.allowed ? "合成データでの操作結果です。実際のメール送信やファイル操作は行いません。" : reasons[last.rule] || "権限チェックで実行を停止しました。詳細は監査ログで確認できます。", output: last.output, rule: last.rule, state: "done", allowed: data.allowed });
       setAudit(a => [...a, ...data.audit.map((e: Audit, i: number) => ({ ...e, sequence: a.length + i + 1 }))]);
       setMessage(data.allowed ? "許可された範囲で返信下書きを作成しました。" : "実行直前の権限チェックで操作を拒否しました。監査ログを確認できます。");
     } catch (caught) { const detail = controller.signal.aborted ? "確認を中断しました。操作結果は確認できていません。" : caught instanceof Error ? caught.message : "操作に失敗しました。"; setToken(""); setError(detail); setMessage("操作結果または現在の起動許可を確認できません。設計診断をやり直してください。"); setOperationResult({ title: `${action}の確認を完了できませんでした`, detail, state: "error" }); }
@@ -97,6 +101,15 @@ export default function LaunchPage() {
   }
   function downloadReport() {
     if (result) saveFile("\uFEFF" + buildReviewReport(result, audit), "text/plain;charset=utf-8", "agent-guardian-review.txt");
+  }
+  function operationButtonClass(operation: Operation) {
+    const base = "button secondary operation-button";
+    if (activeOperation !== operation) return base;
+    if (operationResult?.state === "pending") return `${base} is-pending`;
+    if (operationResult?.state === "error") return `${base} is-error`;
+    if (operationResult?.allowed === true) return `${base} is-allowed`;
+    if (operationResult?.allowed === false) return `${base} is-denied`;
+    return base;
   }
   const verdict = launchVerdict(result, busy, error, Boolean(token));
   return <main className={`guardian ${verdict.tone === "no-go" ? "danger" : verdict.tone === "go" ? "verified" : "repair"}`}>
@@ -133,7 +146,7 @@ export default function LaunchPage() {
         {result.checks.length > 0 && <section className="panel launch-section"><p className="eyebrow">RETEST / ACTUAL ENFORCEMENT</p><h2>拒否できた操作・続けられた仕事</h2><div className="launch-table"><table><thead><tr><th>検証</th><th>実際の動作</th><th>適用ルール</th><th>判定</th></tr></thead><tbody>{result.checks.map((c, i) => <tr key={i}><td>{c.name}</td><td>{c.actualAllowed ? "許可" : "拒否"}</td><td><code>{c.rule}</code></td><td>{c.passed ? "合格" : "不合格"}</td></tr>)}</tbody></table></div><p className="field-help">危険操作は再現可能なテスト入力です。初回のシミュレーションは、AIが攻撃に騙された実績ではありません。</p></section>}
         {result.replyChecks && <section className="panel launch-section"><p className="eyebrow">ANSWER REVIEW / SOURCE VERIFICATION</p><h2>回答内容と根拠の照合</h2><p>顧客・注文・返品条件を、許可された参照結果と照合しています。1つでも不一致なら下書きと起動許可を出しません。</p><div className="launch-table"><table><thead><tr><th>確認項目</th><th>検証方法</th><th>結果</th></tr></thead><tbody>{result.replyChecks.map(c => <tr key={c.name}><td>{c.name}</td><td>{c.reason}</td><td>{c.passed ? "一致" : "不一致・作成を停止"}</td></tr>)}</tbody></table></div></section>}
         {result.draft && <section className="panel launch-section"><p className="eyebrow">NORMAL WORK / GEMINI</p><h2>正常業務：返信下書き</h2><p className="launch-draft">{result.draft}</p><p className="field-help">{result.model} が回答項目を抽出し、根拠との一致を確認して定型文へ変換しました。合成データの顧客・注文・返品条件が検証対象です。自由文全般の意味的正確性を保証するものではありません。送信前は人が最終確認してください。</p></section>}
-        {(token || operationResult) && <section className="panel launch-section"><p className="eyebrow">LIMITED LAUNCH</p><h2>許可・拒否の動作を試す</h2><p>署名付き許可は発行から10分間有効。入力変更後は再審査が必要です。下書きは作成でき、送信・削除は拒否されることを確認できます。結果はボタンの下に表示されます。</p><div className="launch-actions"><button className="button primary" disabled={busy || !token} onClick={() => void execute("draft")}>制限付き起動：下書きを作成</button><button className="button secondary" disabled={busy || !token} onClick={() => void execute("send")}>送信の拒否を確認</button><button className="button secondary" disabled={busy || !token} onClick={() => void execute("delete")}>削除の拒否を確認</button></div><div role="status" aria-live="polite" aria-atomic="true" aria-label="操作確認の結果">{operationResult && <div className={`operation-result ${operationResult.state}`}><h3>{operationResult.title}</h3><p>{operationResult.detail}</p>{operationResult.output && <p className="launch-draft">{operationResult.output}</p>}{operationResult.rule && <details><summary>適用されたルール</summary><code>{operationResult.rule}</code><p>この結果は監査ログと保存用JSONにも記録されます。</p></details>}</div>}</div><p className="field-help">起動時の下書きは公開FAQを使う定型文です。送信の承認・外部連携は未対応です。</p></section>}
+        {(token || operationResult) && <section className="panel launch-section"><p className="eyebrow">LIMITED LAUNCH</p><h2>許可・拒否の動作を試す</h2><p>署名付き許可は発行から10分間有効。入力変更後は再審査が必要です。下書きは作成でき、送信・削除は拒否されることを確認できます。結果はボタンの下に表示されます。</p><div className="launch-actions"><button className={operationButtonClass("draft")} aria-pressed={activeOperation === "draft"} disabled={busy || !token} onClick={() => void execute("draft")}>制限付き起動：下書きを作成</button><button className={operationButtonClass("send")} aria-pressed={activeOperation === "send"} disabled={busy || !token} onClick={() => void execute("send")}>送信の拒否を確認</button><button className={operationButtonClass("delete")} aria-pressed={activeOperation === "delete"} disabled={busy || !token} onClick={() => void execute("delete")}>削除の拒否を確認</button></div><div role="status" aria-live="polite" aria-atomic="true" aria-label="操作確認の結果">{operationResult && <div className={`operation-result ${operationResult.state}`}><h3>{operationResult.title}</h3><p>{operationResult.detail}</p>{operationResult.output && <p className="launch-draft">{operationResult.output}</p>}{operationResult.rule && <details><summary>適用されたルール</summary><code>{operationResult.rule}</code><p>この結果は監査ログと保存用JSONにも記録されます。</p></details>}</div>}</div><p className="field-help">起動時の下書きは公開FAQを使う定型文です。送信の承認・外部連携は未対応です。</p></section>}
       </>}
       <section className="panel launch-section"><div className="panel-heading"><div><p className="eyebrow">LIVE ACTIVITY / AUDIT</p><h2>判断と実行の記録</h2></div><button className="button secondary" onClick={downloadAudit} disabled={(!audit.length && !result) || busy}>詳細ログを保存（JSON）</button></div><p className="field-help">JSONは開発担当者が判定の理由を追跡し、不具合を調べるための詳細データです。元の入力・診断・修正案・全操作の記録を保存します。内容を人に共有するときは、日本語の診断レポートが便利です。</p><div className="launch-log" ref={log} role="log" aria-label="監査ログ">{!audit.length && <p>審査を開始すると、操作と適用ルールがここに記録されます。</p>}{audit.map(e => <div key={e.sequence} className={e.allowed ? "" : "denied"}><small>{new Date(e.at).toLocaleTimeString("ja-JP")} / {e.stage}</small><strong>{e.rule === "WORKFLOW" || e.stage === "INPUT" ? "記録" : e.allowed ? "許可" : "拒否"} · {e.rule}</strong><p>{e.action}</p>{e.output && <details><summary>出力</summary><p>{e.output}</p></details>}</div>)}</div><p className="field-help">JSONの読み込みによる再開・再実行には対応していません。</p></section>
       <footer className="launch-footer">検証対象はGuardian内の隔離環境です。外部の任意のエージェントを停止する機能ではありません。診断結果と操作記録はページ更新で失われます。共有用には診断レポート、詳細の保管にはJSONを保存してください。</footer>

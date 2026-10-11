@@ -190,6 +190,10 @@ input[type=checkbox], input[type=radio] { accent-color: #69e7c7; }
 .primary:hover { background: #91ffdf; box-shadow: 0 0 30px #56efc535; }
 .launch { width: 100%; justify-content: space-between; margin-top: 4px; }
 .secondary { background: #6affda08; color: #a8e8d6; border-color: #6affda40; }
+.operation-button { box-shadow: none; }
+.operation-button.is-pending { color: #d8f8ff; border-color: #77dff5; background: #77dff51c; box-shadow: 0 0 24px #77dff548; }
+.operation-button.is-allowed { color: #052c2b; border-color: #9bffe1; background: #70edcf; box-shadow: 0 0 30px #56efc56b; }
+.operation-button.is-denied, .operation-button.is-error { color: #ffdbe3; border-color: #ff718d; background: #ff718d20; box-shadow: 0 0 30px #ff5f7c55; }
 .stop { width: 100%; margin-top: 12px; color: #ff94a4; border-color: #ff94a440; background: #ff94a409; }
 details { border-top: 1px solid #91afc61b; padding: 14px 0; }
 summary { cursor: pointer; font-size: 11px; color: #acbfce; }
